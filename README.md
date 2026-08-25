@@ -152,6 +152,9 @@ image-studio/
 
 <details>
 <summary><b>为什么中文名叫「拾光」？</b></summary>
+<<<<<<< HEAD
+=======
+
 拾起光，也谐音「时光」——每一张生成的照片，都是被拾起的一段光。
 </details>
 
