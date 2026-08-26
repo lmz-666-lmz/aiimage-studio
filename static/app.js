@@ -610,14 +610,33 @@ function makeCard(item, fresh) {
 }
 
 /* ---------- 画幅 ---------- */
+const sizeCustom = $("size-custom");
+const SIZE_RE = /^\d{2,5}x\d{2,5}$/;
+
+function selectPreset(btn) {
+  document.querySelectorAll(".size:not(.theme-btn)").forEach((b) => {
+    b.classList.toggle("on", b === btn);
+    b.setAttribute("aria-checked", b === btn ? "true" : "false");
+  });
+  size = btn.dataset.size;
+}
+
 document.querySelectorAll(".size:not(.theme-btn)").forEach((btn) => {
   btn.addEventListener("click", () => {
-    document.querySelectorAll(".size:not(.theme-btn)").forEach((b) => {
-      b.classList.toggle("on", b === btn);
-      b.setAttribute("aria-checked", b === btn ? "true" : "false");
-    });
-    size = btn.dataset.size;
+    if (sizeCustom) sizeCustom.value = ""; // 显式选预设 = 清掉自定义值
+    selectPreset(btn);
   });
+});
+
+if (sizeCustom) sizeCustom.addEventListener("input", () => {
+  const v = sizeCustom.value.trim().toLowerCase();
+  if (!SIZE_RE.test(v)) return; // 未填完整前沿用当前画幅
+  // 自定义尺寸原样透传，由中转站决定如何映射
+  document.querySelectorAll(".size:not(.theme-btn)").forEach((b) => {
+    b.classList.remove("on");
+    b.setAttribute("aria-checked", "false");
+  });
+  size = v;
 });
 
 /* ---------- 生成 ---------- */

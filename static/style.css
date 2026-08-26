@@ -268,6 +268,20 @@ textarea:focus, input[type=text]:focus, input[type=password]:focus {
   font-weight: 700;
 }
 
+.size-custom {
+  height: 40px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--text);
+  font-size: 13px;
+  padding: 0 8px;
+  min-width: 0;
+}
+
+.size-custom::placeholder { color: var(--dim); }
+.size-custom:focus { outline: none; border-color: var(--accent); }
+
 .advanced-params { padding-top: 2px; }
 .param-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
 .param-grid > label { color: var(--dim); font-size: 11px; letter-spacing: .08em; }

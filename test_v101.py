@@ -42,18 +42,23 @@ class V101Tests(unittest.TestCase):
         self.assertNotIn("style", payload)
 
     def test_dalle_values_and_grok_no_size(self):
-        # dall-e-3 只接受官方尺寸与 standard/hd 质量，非法值必须被丢弃
+        # dall-e-3 质量只接受官方 standard/hd，非法值必须被丢弃
         cap = studio.capability_for("dall-e-3")
         self.assertEqual(cap["supported_sizes"], ["1024x1024", "1792x1024", "1024x1792"])
+        # 用户显式指定的画幅原样透传，由中转站决定映射
         payload = studio._filtered_payload({"prompt": "x", "size": "1536x1024", "quality": "hd"}, "dall-e-3", cap)
-        self.assertEqual(payload["size"], "1024x1024")  # 非法尺寸回退第一个官方尺寸
+        self.assertEqual(payload["size"], "1536x1024")
         self.assertEqual(payload["quality"], "hd")
         payload = studio._filtered_payload({"prompt": "x", "quality": "high"}, "dall-e-3", cap)
         self.assertNotIn("quality", payload)  # low/medium/high 不属于 dall-e
-        # xAI 图像接口不接收 size，字段整体不发送
-        payload = studio._filtered_payload({"prompt": "x", "size": "1024x1024", "n": "3"}, "grok-image", studio.capability_for("grok-image"))
+        self.assertEqual(payload["size"], "1024x1024")  # 未指定 → 族默认
+        # xAI 图像接口：用户未指定 size 时不发送该字段；显式给了则透传
+        grok = studio.capability_for("grok-image")
+        payload = studio._filtered_payload({"prompt": "x", "n": "3"}, "grok-image", grok)
         self.assertNotIn("size", payload)
         self.assertEqual(payload["n"], 3)
+        payload = studio._filtered_payload({"prompt": "x", "size": "768x1344"}, "grok-image", grok)
+        self.assertEqual(payload["size"], "768x1344")
 
     def test_json_generation_and_multipart_edit(self):
         calls = []

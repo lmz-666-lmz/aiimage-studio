@@ -8,6 +8,7 @@
 import base64
 import json
 import mimetypes
+import re
 import ssl
 import time
 import urllib.error
@@ -631,9 +632,13 @@ def _persist_image_results(data: dict, payload: dict, prov: dict, elapsed: float
 
 def _filtered_payload(body: dict, model: str, cap: dict) -> dict:
     payload = {"model": model, "prompt": (body.get("prompt") or "").strip()}
-    if cap.get("supported_sizes"):
-        payload["size"] = body["size"] if body.get("size") in cap["supported_sizes"] else cap["supported_sizes"][0]
-    # supported_sizes 为空 = 该模型族不接收 size（如 grok image），整个字段不发
+    raw_size = str(body.get("size") or "").strip().lower()
+    if re.fullmatch(r"\d{2,5}x\d{2,5}", raw_size):
+        # 用户显式指定的画幅原样透传，由中转站负责映射（new-api 系均支持）
+        payload["size"] = raw_size
+    elif cap.get("supported_sizes"):
+        payload["size"] = cap["supported_sizes"][0]  # 未指定 → 该模型族默认
+    # 两者皆无 = 该模型族不接收 size（如 grok image），整个字段不发
     if cap.get("n"):
         try:
             payload["n"] = min(4, max(1, int(body.get("n", 1))))
