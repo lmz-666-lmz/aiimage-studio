@@ -187,6 +187,9 @@ function updateCapabilityUI() {
     const first = document.querySelector(`.size:not(.theme-btn)[data-size="${sizes[0]}"]`);
     if (first) { first.classList.add("on"); first.setAttribute("aria-checked", "true"); size = first.dataset.size; }
   }
+  if (sizeField && !sizeField.hidden && (!sizeCustom || !sizeCustom.value.trim())) {
+    setSizeHint(`当前 ${size}`);
+  }
   const refButton = $("reference-add");
   if (refButton) {
     const supported = cap.image_to_image || cap.key === "generic";
@@ -613,12 +616,21 @@ function makeCard(item, fresh) {
 const sizeCustom = $("size-custom");
 const SIZE_RE = /^\d{2,5}x\d{2,5}$/;
 
+function setSizeHint(text, bad = false) {
+  const el = $("size-hint");
+  if (!el) return;
+  el.textContent = text || "";
+  el.classList.toggle("bad", bad);
+}
+
 function selectPreset(btn) {
   document.querySelectorAll(".size:not(.theme-btn)").forEach((b) => {
     b.classList.toggle("on", b === btn);
     b.setAttribute("aria-checked", b === btn ? "true" : "false");
   });
   size = btn.dataset.size;
+  sizeCustom?.classList.remove("invalid");
+  setSizeHint(`当前 ${size}`);
 }
 
 document.querySelectorAll(".size:not(.theme-btn)").forEach((btn) => {
@@ -630,13 +642,21 @@ document.querySelectorAll(".size:not(.theme-btn)").forEach((btn) => {
 
 if (sizeCustom) sizeCustom.addEventListener("input", () => {
   const v = sizeCustom.value.trim().toLowerCase();
-  if (!SIZE_RE.test(v)) return; // 未填完整前沿用当前画幅
+  if (!SIZE_RE.test(v)) {
+    // 出现分隔符却没写完整 = 明显写错才标红，避免输入过程闪红
+    const obviouslyBad = /[x×,，]/.test(v) && !SIZE_RE.test(v);
+    sizeCustom.classList.toggle("invalid", obviouslyBad);
+    setSizeHint(obviouslyBad ? "格式应为 宽x高，如 768x1344" : "", obviouslyBad);
+    return;
+  }
   // 自定义尺寸原样透传，由中转站决定如何映射
+  sizeCustom.classList.remove("invalid");
   document.querySelectorAll(".size:not(.theme-btn)").forEach((b) => {
     b.classList.remove("on");
     b.setAttribute("aria-checked", "false");
   });
   size = v;
+  setSizeHint(`已生效 ${size}（自定义）`);
 });
 
 /* ---------- 生成 ---------- */
@@ -683,6 +703,12 @@ async function gen() {
   const prompt = $("prompt").value.trim();
   if (!prompt) { setGenMsg("请先写一句提示词"); return; }
   if (!modelInput.value.trim()) { setGenMsg("请先选择或填写模型"); return; }
+  const customRaw = sizeCustom?.value.trim() || "";
+  if (customRaw && !SIZE_RE.test(customRaw.toLowerCase())) {
+    setGenMsg("自定义画幅格式应为 宽x高，如 768x1344；可清空输入框改用预设");
+    sizeCustom.classList.add("invalid");
+    return; // 不静默回退，避免用户以为发的是自定义尺寸
+  }
 
   busy = true;
   $("go").disabled = true;

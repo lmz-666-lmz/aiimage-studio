@@ -16,6 +16,7 @@
   --accent-soft: rgba(214, 164, 96, 0.14);
   --on-accent: #241606;
   --shadow: rgba(0, 0, 0, 0.5);
+  --danger: #e07856;
 }
 
 html[data-theme="ink"] {
@@ -34,6 +35,7 @@ html[data-theme="ink"] {
   --accent-soft: rgba(147, 165, 234, 0.14);
   --on-accent: #0c1128;
   --shadow: rgba(2, 4, 12, 0.6);
+  --danger: #e08a9e;
 }
 
 html[data-theme="paper"] {
@@ -52,6 +54,7 @@ html[data-theme="paper"] {
   --accent-soft: rgba(188, 74, 44, 0.1);
   --on-accent: #fdf3e7;
   --shadow: rgba(87, 70, 40, 0.18);
+  --danger: #bc4a2c;
 }
 
 * { box-sizing: border-box; }
@@ -279,6 +282,9 @@ textarea:focus, input[type=text]:focus, input[type=password]:focus {
   min-width: 0;
 }
 
+.size-custom.invalid { border-color: var(--danger); }
+.size-hint { color: var(--faint); font-size: 11px; }
+.size-hint.bad { color: var(--danger); }
 .size-custom::placeholder { color: var(--dim); }
 .size-custom:focus { outline: none; border-color: var(--accent); }
 
