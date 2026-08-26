@@ -1,15 +1,15 @@
 <div align="center">
   <img src="static/assets/logo.png" alt="Image Studio · 拾光" width="420">
   <h1>Image Studio · 拾光</h1>
-  <p><b>v1.0.1 · 本地优先的 OpenAI 兼容生图工作台</b></p>
+  <p><b>v1.0.2 · 本地优先的 OpenAI 兼容生图工作台</b></p>
   <p>作者 / Author: <a href="https://github.com/lmz-666-lmz">lmz-666-lmz</a></p>
   <p><code>Python</code> · <code>Flask</code> · <code>原生 HTML / JS / CSS</code> · <code>GSAP</code> · <code>无 Node.js 构建依赖</code></p>
-  <p><a href="https://github.com/lmz-666-lmz/image-studio">GitHub</a> · <a href="#-快速开始">快速开始</a> · <a href="#-v101-功能">v1.0.1 功能</a> · <a href="#-配置">配置</a> · <a href="#-常见问题">常见问题</a></p>
+  <p><a href="https://github.com/lmz-666-lmz/image-studio">GitHub</a> · <a href="#-快速开始">快速开始</a> · <a href="#-v102-功能">v1.0.2 功能</a> · <a href="#-配置">配置</a> · <a href="#-常见问题">常见问题</a></p>
 </div>
 
 ---
 
-## ✨ v1.0.1 功能
+## ✨ v1.0.2 功能
 
 | 功能 | 说明 |
 |---|---|
@@ -18,6 +18,13 @@
 | **中转站健康检测** | 设置页打开时异步检测各站的 `/v1/models`，显示未检测、正常、较慢、限流、不可用和 `latency_ms`；状态缓存 45 秒，也可手动重新检测。 |
 | **安全故障切换** | 默认关闭。开启后仅在 429 / 502 / 503 / 504 或明确连接失败时尝试一次拥有相同模型的备用站；400 / 401 / 403 和不确定的超时不会重试，避免重复生成和重复计费。 |
 | **本地历史与三套主题** | 保留原有瀑布流历史墙、筛选、分页、灯箱、显影动画和暮金 / 黛夜 / 宣纸主题。 |
+
+v1.0.2 相比 v1.0.1 的改进：
+
+- **自定义画幅**：画幅区新增「自定义…」输入框，任意 `宽x高`（如 768x1344）原样发给中转站，与 new-api 等中转行为一致；输入实时提示生效状态，非法值在生成前明确报错、绝不静默回退。
+- **参数表对齐官方 API**：dall-e 只提供官方尺寸（1792x1024 / 1024x1792）与 standard/hd 质量；grok image 未指定画幅时不发送 size；模型名连字符 / 下划线写法（`grok-image`、`grok_image`）均可识别。
+- **存储修正**：base64 图片按真实字节判断格式（PNG/JPEG/WEBP/GIF），不再一律存成 .webp；文件名加随机段，同一秒多次生成不再互相覆盖。
+- **体验修正**：备用线路救场成功后会明确提示；证书警告改为线程隔离，并发请求不再串扰。
 
 ## 🚀 快速开始
 
@@ -158,4 +165,4 @@ image-studio/
 
 ---
 
-MIT License · Image Studio · 拾光 · v1.0.1
+MIT License · Image Studio · 拾光 · v1.0.2

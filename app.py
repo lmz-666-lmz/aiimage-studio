@@ -18,7 +18,7 @@ from pathlib import Path
 
 from flask import Flask, jsonify, request, send_from_directory
 
-APP_VERSION = "1.0.1"
+APP_VERSION = "1.0.2"
 APP_AUTHOR = "lmz-666-lmz"
 
 # One source of truth for the parameter contract used by the UI and the
