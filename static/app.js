@@ -7,6 +7,8 @@ let page = 1, pages = 1, total = 0;
 let modelList = [];
 let providers = [];          // [{id,name,api_base,api_key,models}]
 let activePid = "";
+let capabilityDefs = {};
+let referenceFile = null;
 let editingPid = "";         // 正在编辑的中转站，空 = 新增
 let wallItems = [];          // 当前墙上的图片（新→旧），供灯箱左右切换
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -106,6 +108,7 @@ async function loadSettings() {
     $("set-name").value = s.name;
     providers = s.providers || [];
     activePid = s.active_provider || "";
+    $("failover-toggle").checked = !!s.failover_enabled;
     renderProviders();
     markTheme(s.theme);
     const noApi = !providers.length;
@@ -118,12 +121,62 @@ async function loadSettings() {
   } catch { /* 用默认值 */ }
 }
 
+async function loadCapabilities() {
+  try {
+    const d = await (await fetch("/api/capabilities")).json();
+    capabilityDefs = d.capabilities || {};
+  } catch { capabilityDefs = {}; }
+  updateCapabilityUI();
+}
+
 function applyIdentity(name, t) {
   if (name) {
     $("app-name").textContent = name;
     document.title = `${name} · 生图`;
   }
   if (t) document.documentElement.dataset.theme = t;
+}
+
+function capabilityFor(model) {
+  const name = (model || "").toLowerCase();
+  const matchers = [
+    ["gpt-image", "gpt-image"], ["dall-e", "dall-e"], ["nano-banana", "nano-banana"],
+    ["banana", "banana"], ["gemini image", "gemini"], ["seedream", "seedream"],
+    ["flux", "flux"], ["grok image", "grok image"], ["image", "image"],
+  ];
+  for (const [key, matcher] of matchers) if (name.includes(matcher) && capabilityDefs[key]) return { ...capabilityDefs[key], key };
+  return { ...(capabilityDefs.generic || { family: "Generic OpenAI Compatible", text_to_image: true, image_to_image: true, supported_sizes: ["1024x1024", "1536x1024", "1024x1536"], n: true }), key: "generic" };
+}
+
+function updateCapabilityUI() {
+  const cap = capabilityFor(modelInput?.value || "");
+  const params = $("advanced-params");
+  if (params) params.hidden = false;
+  $("capability-label").textContent = cap.family || "Generic OpenAI Compatible";
+  ["quality", "background", "style", "n"].forEach((key) => {
+    const row = $(`${key}-param`);
+    if (row) row.hidden = key === "n" ? !cap.n : !cap[key];
+  });
+  const sizes = cap.supported_sizes || ["1024x1024"];
+  document.querySelectorAll(".size:not(.theme-btn)").forEach((btn) => {
+    const enabled = sizes.includes(btn.dataset.size);
+    btn.hidden = !enabled;
+    if (!enabled && btn.classList.contains("on")) {
+      btn.classList.remove("on");
+      btn.setAttribute("aria-checked", "false");
+    }
+  });
+  if (!document.querySelector(".size:not(.theme-btn).on")) {
+    const first = document.querySelector(`.size:not(.theme-btn)[data-size="${sizes[0]}"]`);
+    if (first) { first.classList.add("on"); first.setAttribute("aria-checked", "true"); size = first.dataset.size; }
+  }
+  const refButton = $("reference-add");
+  if (refButton) {
+    const supported = cap.image_to_image || cap.key === "generic";
+    refButton.classList.toggle("disabled", !supported);
+    refButton.title = supported ? "添加参考图" : "当前模型暂未声明参考图能力";
+    $("reference-note").textContent = supported ? "拖入或粘贴图片" : "当前模型暂未声明参考图能力";
+  }
 }
 
 function markTheme(t) {
@@ -152,13 +205,14 @@ function renderProviders() {
         <span class="prov-name">${escapeHtml(p.name)}</span>
         ${isActive ? '<span class="prov-tag">使用中</span>' : ""}
         <span style="flex:1"></span>
+        <span class="prov-health ${(p.health || {}).status || "unchecked"}">${healthLabel(p.health)}</span>
         <button class="prov-btn use ${isActive ? "on" : ""}" ${isActive ? "disabled" : ""}>${isActive ? "使用中" : "使用"}</button>
         <button class="prov-btn edit">编辑</button>
         <button class="prov-btn danger del">删除</button>
       </div>
       <div class="prov-facts">
         <span><b>地址</b>${escapeHtml(p.api_base || "未填写")}</span>
-        <span><b>Key</b>${maskKey(p.api_key)}</span>
+        <span><b>Key</b>${p.has_key ? "已保存（仅本机可见）" : "未填写"}</span>
         <span><b>模型</b>${(p.models || []).length} 个</span>
       </div>`;
     card.querySelector(".use").addEventListener("click", () => activateProvider(p.id));
@@ -166,6 +220,12 @@ function renderProviders() {
     card.querySelector(".del").addEventListener("click", () => deleteProvider(p.id, p.name));
     box.appendChild(card);
   }
+}
+
+function healthLabel(health) {
+  const h = health || {};
+  const names = { unchecked: "未检测", healthy: "正常", slow: "较慢", rate_limited: "限流", unavailable: "不可用" };
+  return `${names[h.status] || "未检测"}${h.latency_ms != null ? ` ${h.latency_ms}ms` : ""}`;
 }
 
 function escapeHtml(s) {
@@ -178,7 +238,8 @@ function openProviderForm(pid) {
   $("provider-form").hidden = false;
   $("pf-name").value = p ? p.name : "";
   $("pf-base").value = p ? p.api_base : "";
-  $("pf-key").value = p ? p.api_key : "";
+  $("pf-key").value = "";
+  $("pf-key").placeholder = p?.has_key ? "已保存，留空则保持不变" : "sk-…";
   $("pf-name").focus();
 }
 
@@ -257,8 +318,27 @@ async function activateProvider(pid) {
     modelInput.placeholder = modelList.length ? "输入筛选或直接填写模型名" : "未发现生图模型，可手动填写";
     if (modelList.length) modelInput.value = modelList.includes("fal-gpt-image-2") ? "fal-gpt-image-2" : modelList[0];
     if (!modelListBox.hidden) renderModelList();
+    updateCapabilityUI();
     setMsg(d.warning ? `已切换，但拉取模型失败：${d.warning}` : "已切换，模型列表已刷新", d.warning ? "err" : "ok");
   } catch (e) { setMsg(e.message, "err"); }
+}
+
+async function refreshHealth(force = false) {
+  setMsg("检测中…");
+  try {
+    const results = [];
+    for (const p of providers) {
+      const r = await fetch("/api/providers/health", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ provider_id: p.id, force }) });
+      const d = await r.json();
+      if (d.providers?.[0]) results.push(d.providers[0]);
+    }
+    for (const result of results) {
+      const p = providers.find((x) => x.id === result.provider_id);
+      if (p) p.health = result;
+    }
+    renderProviders();
+    setMsg("健康状态已更新", "ok");
+  } catch (e) { setMsg("健康检测失败：" + e.message, "err"); }
 }
 
 async function deleteProvider(pid, name) {
@@ -315,9 +395,18 @@ document.querySelectorAll(".theme-btn").forEach((btn) => {
 });
 
 const settingsEl = $("settings");
-$("open-settings").addEventListener("click", () => { settingsEl.hidden = false; setMsg(""); });
+$("open-settings").addEventListener("click", () => { settingsEl.hidden = false; setMsg(""); refreshHealth(false); });
 $("set-close").addEventListener("click", () => { settingsEl.hidden = true; closeProviderForm(); loadSettings(); });
 settingsEl.addEventListener("click", (e) => { if (e.target === settingsEl) { settingsEl.hidden = true; closeProviderForm(); loadSettings(); } });
+$("failover-toggle").addEventListener("change", async (e) => {
+  try {
+    const r = await fetch("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ failover_enabled: e.target.checked }) });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    setMsg(e.target.checked ? "备用线路已开启" : "备用线路已关闭", "ok");
+  } catch (err) { e.target.checked = !e.target.checked; setMsg(err.message, "err"); }
+});
+$("health-refresh").addEventListener("click", () => refreshHealth(true));
 
 /* ---------- 可搜索模型下拉（含最近使用） ---------- */
 const modelInput = $("model");
@@ -351,7 +440,7 @@ function renderModelList(filter = "") {
 }
 
 modelInput.addEventListener("focus", () => renderModelList(modelInput.value && modelList.some((m) => m === modelInput.value) ? "" : modelInput.value));
-modelInput.addEventListener("input", () => renderModelList(modelInput.value));
+modelInput.addEventListener("input", () => { renderModelList(modelInput.value); updateCapabilityUI(); });
 
 $("model-combo").querySelector(".combo-toggle").addEventListener("click", () => {
   if (modelListBox.hidden) renderModelList();
@@ -363,6 +452,7 @@ modelListBox.addEventListener("click", (e) => {
   if (!opt) return;
   modelInput.value = opt.textContent.replace(/^↻\s*/, "");
   modelListBox.hidden = true;
+  updateCapabilityUI();
 });
 
 document.addEventListener("click", (e) => {
@@ -389,6 +479,7 @@ async function loadModels() {
     modelInput.placeholder = "未配置 API，可手动填写模型名";
   }
   if (!modelListBox.hidden) renderModelList(); // 渲染完整列表，不按默认选中名过滤
+  updateCapabilityUI();
 }
 
 /* ---------- 历史墙：分页 + 筛选 ---------- */
@@ -444,6 +535,8 @@ async function loadHistory(p = page) {
     const g = $("gallery");
     g.innerHTML = "";
     for (const item of d.items) g.appendChild(makeCard(item, false));
+    const empty = $("empty");
+    if (empty) empty.hidden = !!d.items.length;
     renderPager();
     if (gsapOK && d.items.length) {
       gsap.from("#gallery .print", { y: 24, autoAlpha: 0, duration: 0.5, stagger: 0.05, ease: "power3.out", clearProps: "all" });
@@ -513,6 +606,42 @@ document.querySelectorAll(".size:not(.theme-btn)").forEach((btn) => {
 /* ---------- 生成 ---------- */
 function setGenMsg(text) { $("msg").textContent = text || ""; }
 
+function setReference(file) {
+  if (!file) return;
+  const cap = capabilityFor(modelInput.value);
+  if (!cap.image_to_image && cap.key !== "generic") { setGenMsg("当前模型暂未声明参考图能力"); return; }
+  if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) { setGenMsg("参考图仅支持 PNG、JPEG 或 WEBP"); return; }
+  if (!file.size) { setGenMsg("参考图为空"); return; }
+  if (file.size > 10 * 1024 * 1024) { setGenMsg("参考图过大，请控制在 10MB 以内"); return; }
+  referenceFile = file;
+  $("reference-thumb").src = URL.createObjectURL(file);
+  $("reference-name").textContent = file.name || "粘贴的图片";
+  $("reference-preview").hidden = false;
+  $("reference-add").hidden = true;
+  $("reference-note").textContent = "图生图模式";
+}
+
+function clearReference() {
+  referenceFile = null;
+  $("reference-input").value = "";
+  $("reference-preview").hidden = true;
+  $("reference-add").hidden = false;
+  updateCapabilityUI();
+}
+
+$("reference-add").addEventListener("click", () => {
+  if (!$("reference-add").classList.contains("disabled")) $("reference-input").click();
+});
+$("reference-input").addEventListener("change", (e) => setReference(e.target.files[0]));
+$("reference-clear").addEventListener("click", clearReference);
+$("reference-box").addEventListener("dragover", (e) => { e.preventDefault(); $("reference-box").classList.add("dragover"); });
+$("reference-box").addEventListener("dragleave", () => $("reference-box").classList.remove("dragover"));
+$("reference-box").addEventListener("drop", (e) => { e.preventDefault(); $("reference-box").classList.remove("dragover"); setReference(e.dataTransfer.files[0]); });
+$("prompt").addEventListener("paste", (e) => {
+  const file = [...(e.clipboardData?.items || [])].find((item) => item.type.startsWith("image/"))?.getAsFile();
+  if (file) { e.preventDefault(); setReference(file); }
+});
+
 async function gen() {
   if (busy) return;
   const prompt = $("prompt").value.trim();
@@ -540,23 +669,34 @@ async function gen() {
   const timer = setInterval(() => { timeEl.textContent = `${Math.round((Date.now() - t0) / 1000)}s`; }, 500);
 
   try {
-    const r = await fetch("/api/generate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt, model: modelInput.value.trim(), size }),
-    });
+    const fields = { prompt, model: modelInput.value.trim(), size, quality: $("quality").value, background: $("background").value, style: $("style").value, n: $("n").value };
+    const options = { method: "POST" };
+    if (referenceFile) {
+      const form = new FormData();
+      Object.entries(fields).forEach(([key, value]) => form.append(key, value));
+      form.append("image", referenceFile, referenceFile.name || "reference.png");
+      options.body = form;
+    } else {
+      options.headers = { "Content-Type": "application/json" };
+      options.body = JSON.stringify(fields);
+    }
+    const r = await fetch("/api/generate", options);
     const d = await r.json();
     if (d.error) throw new Error(d.error);
-    const img = d.images[0];
-    const fresh = makeCard({
-      url: img.url, name: img.name, model: d.model, elapsed: d.elapsed,
-      prompt: d.prompt, size: img.size, created_time: img.created_time,
-    }, true);
+    const images = d.images || [];
+    if (!images.length) throw new Error("上游未返回图片");
+    const first = images[0];
+    const withResponseMeta = (img) => ({ ...img, model: d.model, elapsed: d.elapsed, prompt: d.prompt,
+      provider: d.provider, provider_id: d.provider_id, mode: d.mode, reference_used: !!img.reference_used,
+      failover: !!d.failover, failover_from: d.failover_from || "" });
+    const fresh = makeCard(withResponseMeta(first), true);
     fresh.querySelector("img").classList.add("develop");
     card.replaceWith(fresh);
-    wallItems.unshift({ ...img, url: img.url, name: img.name });
+    for (let i = images.length - 1; i >= 1; i--) $("gallery").prepend(makeCard(withResponseMeta(images[i]), true));
+    wallItems.unshift(...images.map(withResponseMeta));
     pushPromptHistory(prompt);
     pushRecentModel(d.model);
+    if (referenceFile) clearReference();
   } catch (e) {
     card.remove();
     setGenMsg("出错：" + e.message);
@@ -654,6 +794,8 @@ function fillLbInfo(item) {
   $("lb-time").textContent = item.created_time || "—";
   $("lb-elapsed").textContent = item.elapsed != null ? `${item.elapsed} 秒` : "—";
   $("lb-size").textContent = item.size || "—";
+  $("lb-mode").textContent = item.mode === "image-to-image" ? "图生图" : "文生图";
+  $("lb-route").textContent = item.failover ? `备用线路（来自 ${item.failover_from || "主线路"}）` : "主线路";
   $("lb-prompt").textContent = item.prompt || "（早期图片没有记录提示词）";
 }
 
@@ -757,6 +899,7 @@ $("go").addEventListener("click", gen);
 
 /* ---------- 启动 ---------- */
 enterRail();
+loadCapabilities();
 loadSettings();
 loadModels();
 renderPromptHistory();

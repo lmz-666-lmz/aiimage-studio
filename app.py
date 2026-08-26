@@ -7,6 +7,7 @@
 """
 import base64
 import json
+import mimetypes
 import ssl
 import time
 import urllib.error
@@ -15,6 +16,76 @@ import uuid
 from pathlib import Path
 
 from flask import Flask, jsonify, request, send_from_directory
+
+APP_VERSION = "1.0.1"
+APP_AUTHOR = "lmz-666-lmz"
+
+# One source of truth for the parameter contract used by the UI and the
+# upstream request filter.  Unknown models intentionally use the generic
+# compatible profile instead of being rejected.
+MODEL_CAPABILITIES = {
+    "gpt-image": {
+        "family": "GPT Image", "text_to_image": True, "image_to_image": True,
+        "supported_sizes": ["1024x1024", "1536x1024", "1024x1536"],
+        "quality": True, "background": True, "style": False, "n": True,
+    },
+    "dall-e": {
+        "family": "DALL-E", "text_to_image": True, "image_to_image": False,
+        "supported_sizes": ["1024x1024", "1536x1024", "1024x1536"],
+        "quality": True, "background": False, "style": True, "n": True,
+    },
+    "nano-banana": {
+        "family": "Nano Banana", "text_to_image": True, "image_to_image": True,
+        "supported_sizes": ["1024x1024", "1536x1024", "1024x1536"],
+        "quality": False, "background": False, "style": False, "n": True,
+    },
+    "banana": {
+        "family": "Nano Banana", "text_to_image": True, "image_to_image": True,
+        "supported_sizes": ["1024x1024", "1536x1024", "1024x1536"],
+        "quality": False, "background": False, "style": False, "n": True,
+    },
+    "gemini image": {
+        "family": "Gemini Image", "text_to_image": True, "image_to_image": True,
+        "supported_sizes": ["1024x1024", "1536x1024", "1024x1536"],
+        "quality": False, "background": False, "style": False, "n": True,
+    },
+    "seedream": {
+        "family": "Seedream", "text_to_image": True, "image_to_image": True,
+        "supported_sizes": ["1024x1024", "1536x1024", "1024x1536"],
+        "quality": False, "background": False, "style": False, "n": True,
+    },
+    "flux": {
+        "family": "FLUX", "text_to_image": True, "image_to_image": True,
+        "supported_sizes": ["1024x1024", "1536x1024", "1024x1536"],
+        "quality": False, "background": False, "style": False, "n": True,
+    },
+    "grok image": {
+        "family": "Grok Image", "text_to_image": True, "image_to_image": True,
+        "supported_sizes": ["1024x1024", "1536x1024", "1024x1536"],
+        "quality": False, "background": False, "style": False, "n": True,
+    },
+    "image": {
+        "family": "Image Compatible", "text_to_image": True, "image_to_image": True,
+        "supported_sizes": ["1024x1024", "1536x1024", "1024x1536"],
+        "quality": False, "background": False, "style": False, "n": True,
+    },
+    "generic": {
+        "family": "Generic OpenAI Compatible", "text_to_image": True, "image_to_image": True,
+        "supported_sizes": ["1024x1024", "1536x1024", "1024x1536"],
+        "quality": False, "background": False, "style": False, "n": True,
+    },
+}
+
+CAPABILITY_MATCHERS = (
+    ("gpt-image", "gpt-image"), ("dall-e", "dall-e"), ("nano-banana", "nano-banana"),
+    ("banana", "banana"), ("gemini image", "gemini"), ("seedream", "seedream"),
+    ("flux", "flux"), ("grok image", "grok image"), ("image", "image"),
+)
+
+HEALTH_TTL = 45
+HEALTH_STATES = ("unchecked", "healthy", "slow", "rate_limited", "unavailable")
+MAX_REFERENCE_BYTES = 10 * 1024 * 1024
+REFERENCE_MIMES = {"image/png", "image/jpeg", "image/webp"}
 
 BASE_DIR = Path(__file__).resolve().parent
 OUTPUT_DIR = BASE_DIR / "outputs"
@@ -26,12 +97,32 @@ DEFAULT_CONFIG = {
     "theme": "darkroom",
     "providers": [],
     "active_provider": "",
+    "failover_enabled": False,
 }
 THEMES = ("darkroom", "ink", "paper")
 
 
 def _new_id() -> str:
     return f"provider_{uuid.uuid4().hex[:8]}"
+
+
+def capability_for(model: str | None) -> dict:
+    """Match aliases/substrings so relay-renamed model ids still adapt."""
+    name = (model or "").strip().lower()
+    for key, matcher in CAPABILITY_MATCHERS:
+        if matcher in name:
+            return {**MODEL_CAPABILITIES[key], "key": key}
+    return {**MODEL_CAPABILITIES["generic"], "key": "generic"}
+
+
+def public_provider(provider: dict) -> dict:
+    """Never send API keys to the browser or include them in health payloads."""
+    return {
+        "id": provider.get("id", ""), "name": provider.get("name", ""),
+        "api_base": provider.get("api_base", ""), "models": list(provider.get("models") or []),
+        "health": dict(provider.get("health") or {"status": "unchecked"}),
+        "has_key": bool(provider.get("api_key")),
+    }
 
 
 def save_config_dict(cfg: dict):
@@ -58,10 +149,15 @@ def _migrate(cfg: dict) -> bool:
         if not p.get("id"):
             p["id"] = _new_id()
             changed = True
-        for field, default in (("name", "未命名中转"), ("api_base", ""), ("api_key", ""), ("models", [])):
+        for field, default in (("name", "未命名中转"), ("api_base", ""), ("api_key", ""), ("models", []),
+                               ("health", {"status": "unchecked"})):
             if field not in p:
                 p[field] = default
                 changed = True
+        if not isinstance(p.get("health"), dict):
+            p["health"] = {"status": "unchecked"}
+            changed = True
+        p["health"].setdefault("status", "unchecked")
     ids = {p["id"] for p in cfg["providers"]}
     if cfg.get("active_provider") not in ids:
         cfg["active_provider"] = cfg["providers"][0]["id"] if cfg["providers"] else ""
@@ -70,6 +166,9 @@ def _migrate(cfg: dict) -> bool:
         if legacy in cfg:
             del cfg[legacy]
             changed = True
+    if "failover_enabled" not in cfg:
+        cfg["failover_enabled"] = False
+        changed = True
     return changed
 
 
@@ -163,14 +262,13 @@ def with_tls_note(payload: dict) -> dict:
 def friendly_error(e: Exception) -> str:
     """把上游异常翻译成可操作的中文提示。"""
     if isinstance(e, urllib.error.HTTPError):
-        detail = e.read().decode(errors="replace").strip()[:120]
         head = {
             401: "API Key 无效或已过期，请检查密钥是否填对",
             403: "没有访问权限（HTTP 403），请确认密钥可用或切换其他中转站",
             404: "接口不存在（HTTP 404），请检查中转站地址是否正确",
             429: "请求太频繁或额度不足（HTTP 429），请稍后再试",
         }.get(e.code, f"当前中转站不可用（HTTP {e.code}），请稍后重试或切换其他服务")
-        return f"{head}｜{detail}" if detail else head
+        return head
     if isinstance(e, urllib.error.URLError):
         reason = getattr(e, "reason", e)
         if isinstance(reason, TimeoutError):
@@ -179,6 +277,61 @@ def friendly_error(e: Exception) -> str:
     if isinstance(e, TimeoutError):
         return "请求超时，模型可能正忙，请稍后再试或换个模型"
     return f"生成失败：{e}"
+
+
+def error_status(e: Exception) -> str:
+    if isinstance(e, urllib.error.HTTPError):
+        if e.code == 429:
+            return "rate_limited"
+        if e.code in (502, 503, 504):
+            return "unavailable"
+        return "unavailable"
+    if isinstance(e, urllib.error.URLError):
+        reason = getattr(e, "reason", None)
+        if isinstance(reason, TimeoutError) or "timed out" in str(reason).lower():
+            return "slow"
+        return "unavailable"
+    if isinstance(e, TimeoutError):
+        return "slow"
+    return "unavailable"
+
+
+def is_safe_failover_error(e: Exception) -> bool:
+    """Only retry errors that prove the request did not complete upstream."""
+    if isinstance(e, urllib.error.HTTPError):
+        return e.code in (429, 502, 503, 504)
+    if isinstance(e, urllib.error.URLError):
+        reason = getattr(e, "reason", None)
+        return not isinstance(reason, TimeoutError) and "timed out" not in str(reason).lower()
+    return False
+
+
+def set_health(prov: dict, status: str, latency_ms: int | None = None, error: str | None = None):
+    record = {"status": status, "checked_at": int(time.time())}
+    if latency_ms is not None:
+        record["latency_ms"] = latency_ms
+    if error:
+        record["error"] = error
+    prov["health"] = record
+    save_config()
+
+
+def check_provider_health(prov: dict, force: bool = False) -> dict:
+    if not prov or not prov.get("api_base") or not prov.get("api_key"):
+        return {"status": "unavailable", "error": "未配置地址或密钥"}
+    existing = prov.get("health") or {}
+    if not force and existing.get("checked_at") and time.time() - existing["checked_at"] < HEALTH_TTL:
+        return existing
+    started = time.perf_counter()
+    try:
+        upstream("/v1/models", base=prov["api_base"], key=prov["api_key"], timeout=20)
+        latency = round((time.perf_counter() - started) * 1000)
+        status = "slow" if latency >= 1500 else "healthy"
+        set_health(prov, status, latency)
+    except Exception as e:
+        status = "rate_limited" if isinstance(e, urllib.error.HTTPError) and e.code == 429 else "unavailable"
+        set_health(prov, status, round((time.perf_counter() - started) * 1000), friendly_error(e))
+    return prov.get("health") or {"status": "unavailable"}
 
 
 @app.get("/")
@@ -192,8 +345,11 @@ def settings_payload():
     return {
         "name": config["name"],
         "theme": config["theme"],
-        "providers": config["providers"],
+        "providers": [public_provider(p) for p in config["providers"]],
         "active_provider": config["active_provider"],
+        "failover_enabled": bool(config.get("failover_enabled", False)),
+        "version": APP_VERSION,
+        "author": APP_AUTHOR,
     }
 
 
@@ -215,6 +371,8 @@ def set_settings():
         if body["theme"] not in THEMES:
             return jsonify({"error": "未知主题"}), 400
         config["theme"] = body["theme"]
+    if "failover_enabled" in body:
+        config["failover_enabled"] = bool(body["failover_enabled"])
     save_config()
     return jsonify(settings_payload())
 
@@ -239,7 +397,18 @@ def upsert_provider():
     body = request.get_json(force=True)
     fields, err = _validate_provider_body(body)
     if err:
-        return jsonify({"error": err}), 400
+        # Editing an existing provider may leave the key blank to keep it.
+        pid = (body.get("id") or "").strip()
+        if not pid or body.get("api_key", "").strip():
+            return jsonify({"error": err}), 400
+        target = next((p for p in config["providers"] if p["id"] == pid), None)
+        if not target:
+            return jsonify({"error": err}), 400
+        name = (body.get("name") or "").strip()
+        api_base = (body.get("api_base") or "").strip().rstrip("/")
+        if not name or not api_base.startswith(("http://", "https://")):
+            return jsonify({"error": err}), 400
+        fields = {"name": name, "api_base": api_base, "api_key": target.get("api_key", "")}
     pid = (body.get("id") or "").strip()
     if pid:
         target = next((p for p in config["providers"] if p["id"] == pid), None)
@@ -248,6 +417,7 @@ def upsert_provider():
         if target["api_base"] != fields["api_base"] or target["api_key"] != fields["api_key"]:
             target["models"] = []
             drop_models_cache(target["api_base"], target["api_key"])
+            target["health"] = {"status": "unchecked"}
         target.update(fields)
     else:
         entry = {"id": _new_id(), **fields, "models": []}
@@ -358,80 +528,208 @@ def test_conn():
         return jsonify({"ok": False, "error": friendly_error(e)})
 
 
-# ---------- 生成 ----------
-@app.post("/api/generate")
-def generate():
-    prov = active_provider()
-    if not prov or not prov["api_base"] or not prov["api_key"]:
-        return jsonify({"error": "还没有可用的中转站，请在设置里添加并填写地址和密钥"}), 400
-    body = request.get_json(force=True)
-    prompt = (body.get("prompt") or "").strip()
-    if not prompt:
-        return jsonify({"error": "提示词不能为空"}), 400
-    payload = {
-        "model": body.get("model") or "fal-gpt-image-2",
-        "prompt": prompt,
-        "n": 1,
-        "size": body.get("size") or "1024x1024",
-    }
-    try:
-        t0 = time.time()
-        data = upstream("/v1/images/generations", payload, base=prov["api_base"], key=prov["api_key"])
-    except Exception as e:
-        return jsonify({"error": friendly_error(e)}), 502
+@app.post("/api/providers/health")
+def provider_health():
+    """Cheap /v1/models probe; cached for HEALTH_TTL seconds and never generates."""
+    body = request.get_json(silent=True) or {}
+    pid = (body.get("provider_id") or "").strip()
+    targets = config["providers"] if not pid else [p for p in config["providers"] if p["id"] == pid]
+    if pid and not targets:
+        return jsonify({"error": "中转站不存在"}), 404
+    force = bool(body.get("force"))
+    statuses = [dict(check_provider_health(p, force=force), provider_id=p["id"], provider_name=p["name"])
+                for p in targets]
+    return jsonify({"providers": statuses, "settings": settings_payload()})
 
+
+@app.get("/api/capabilities")
+def capabilities():
+    return jsonify({"capabilities": MODEL_CAPABILITIES, "matchers": CAPABILITY_MATCHERS})
+
+
+# ---------- 生成 ----------
+def upstream_multipart(path: str, fields: dict, file_field: str, filename: str,
+                       blob: bytes, mime: str, timeout: int = 300,
+                       base: str | None = None, key: str | None = None):
+    """Small stdlib-only multipart encoder for OpenAI-compatible image edits."""
+    global tls_note
+    tls_note = None
+    prov = active_provider() or {}
+    base = (base if base is not None else prov.get("api_base", "")).rstrip("/")
+    if base.endswith("/v1"):
+        base = base[:-3]
+    key = key if key is not None else prov.get("api_key", "")
+    boundary = f"----ImageStudio{uuid.uuid4().hex}"
+    chunks = []
+    for name, value in fields.items():
+        chunks.extend([f"--{boundary}\r\n".encode(),
+                       f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode(),
+                       str(value).encode(), b"\r\n"])
+    chunks.extend([f"--{boundary}\r\n".encode(),
+                   f'Content-Disposition: form-data; name="{file_field}"; filename="{filename}"\r\n'.encode(),
+                   f"Content-Type: {mime}\r\n\r\n".encode(), blob, b"\r\n",
+                   f"--{boundary}--\r\n".encode()])
+    req = urllib.request.Request(
+        f"{base}{path}", data=b"".join(chunks), method="POST",
+        headers={"Authorization": f"Bearer {key}", "Content-Type": f"multipart/form-data; boundary={boundary}",
+                 "User-Agent": "Mozilla/5.0"},
+    )
+    data, _ = _fetch(req, timeout)
+    return json.loads(data)
+
+
+def _ext_from(content_type: str, url: str) -> str:
+    ct = (content_type or "").lower()
+    if "png" in ct: return ".png"
+    if "jpeg" in ct or "jpg" in ct: return ".jpg"
+    if "webp" in ct: return ".webp"
+    low = url.lower().split("?")[0]
+    for ext in (".png", ".jpg", ".jpeg", ".webp"):
+        if low.endswith(ext): return ext
+    return ".png"
+
+
+def _persist_image_results(data: dict, payload: dict, prov: dict, elapsed: float,
+                           extra_meta: dict | None = None):
     items = data.get("data") or []
     if not items:
-        return jsonify({"error": f"上游未返回图片: {json.dumps(data, ensure_ascii=False)[:300]}"}), 502
-
-    elapsed = round(time.time() - t0, 1)
-
-    def _ext_from(content_type: str, url: str) -> str:
-        ct = (content_type or "").lower()
-        if "png" in ct: return ".png"
-        if "jpeg" in ct or "jpg" in ct: return ".jpg"
-        if "webp" in ct: return ".webp"
-        if "gif" in ct: return ".gif"
-        low = url.lower().split("?")[0]
-        for e in (".png", ".jpg", ".jpeg", ".webp"):
-            if low.endswith(e): return e
-        return ".png"
-
-    def _persist(name: str, blob: bytes, meta: dict):
-        (OUTPUT_DIR / name).write_bytes(blob)
-        (OUTPUT_DIR / f"{name}.json").write_text(
-            json.dumps(meta, ensure_ascii=False), encoding="utf-8"
-        )
-
+        raise ValueError("上游未返回图片")
+    extra_meta = extra_meta or {}
     results = []
     for i, item in enumerate(items):
-        meta = {
-            "model": payload["model"],
-            "provider": prov["name"],
-            "elapsed": elapsed,
-            "prompt": prompt,
-            "size": payload["size"],
-            "created": int(time.time()),
-            "created_time": time.strftime("%Y-%m-%d %H:%M:%S"),
-        }
+        meta = {"model": payload["model"], "provider": prov["name"], "provider_id": prov["id"],
+                "elapsed": elapsed, "prompt": payload["prompt"], "size": payload.get("size", ""),
+                "created": int(time.time()), "created_time": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "mode": extra_meta.get("mode", "text-to-image"),
+                "reference_used": bool(extra_meta.get("reference_used", False)),
+                "reference_name": extra_meta.get("reference_name", ""),
+                "failover": bool(extra_meta.get("failover", False)),
+                "failover_from": extra_meta.get("failover_from", "")}
         if item.get("b64_json"):
             name = f"{time.strftime('%Y%m%d_%H%M%S')}_{i}.webp"
-            _persist(name, base64.b64decode(item["b64_json"]), meta)
+            blob = base64.b64decode(item["b64_json"])
+            (OUTPUT_DIR / name).write_bytes(blob)
+            (OUTPUT_DIR / f"{name}.json").write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
             results.append({"url": f"/outputs/{name}", "name": name, **meta})
         elif item.get("url"):
-            # URL 型结果：下载落盘，否则刷新后历史墙找不到文件、信息面板也无从展示
             req = urllib.request.Request(item["url"], headers={"User-Agent": "Mozilla/5.0"})
             try:
                 blob, ct = _fetch(req, 120)
                 name = f"{time.strftime('%Y%m%d_%H%M%S')}_{i}{_ext_from(ct, item['url'])}"
-                _persist(name, blob, meta)
+                (OUTPUT_DIR / name).write_bytes(blob)
+                (OUTPUT_DIR / f"{name}.json").write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
                 results.append({"url": f"/outputs/{name}", "name": name, **meta})
             except Exception as e:
-                # 下载失败时兜底透传远端链接（本次能看，但不进历史）
                 results.append({"url": item["url"], "name": None, "fetch_error": friendly_error(e)})
+    return results
 
-    return jsonify(with_tls_note({"images": results, "elapsed": elapsed, "model": payload["model"],
-                    "prompt": prompt, "provider": prov["name"]}))
+
+def _filtered_payload(body: dict, model: str, cap: dict) -> dict:
+    payload = {"model": model, "prompt": (body.get("prompt") or "").strip()}
+    if cap.get("supported_sizes") and body.get("size") in cap["supported_sizes"]:
+        payload["size"] = body["size"]
+    else:
+        payload["size"] = cap.get("supported_sizes", ["1024x1024"])[0]
+    if cap.get("n"):
+        try:
+            payload["n"] = min(4, max(1, int(body.get("n", 1))))
+        except (TypeError, ValueError):
+            payload["n"] = 1
+    for key in ("quality", "background", "style"):
+        if cap.get(key) and body.get(key):
+            payload[key] = body[key]
+    return payload
+
+
+def _reference_file():
+    image = request.files.get("image")
+    if not image or not image.filename:
+        return None, "请选择参考图"
+    mime = (image.mimetype or mimetypes.guess_type(image.filename)[0] or "").lower()
+    if mime not in REFERENCE_MIMES:
+        return None, "参考图仅支持 PNG、JPEG 或 WEBP"
+    blob = image.read(MAX_REFERENCE_BYTES + 1)
+    if not blob:
+        return None, "参考图为空"
+    if len(blob) > MAX_REFERENCE_BYTES:
+        return None, "参考图过大，请控制在 10MB 以内"
+    return (image.filename, mime, blob), None
+
+
+def _providers_for_model(model: str, primary: dict):
+    return [p for p in config["providers"] if p["id"] != primary["id"] and model in (p.get("models") or [])]
+
+
+@app.post("/api/generate")
+def generate():
+    prov = active_provider()
+    if not prov or not prov.get("api_base") or not prov.get("api_key"):
+        return jsonify({"error": "还没有可用的中转站，请在设置里添加并填写地址和密钥"}), 400
+    is_multipart = request.mimetype == "multipart/form-data"
+    body = request.form.to_dict() if is_multipart else (request.get_json(silent=True) or {})
+    prompt = (body.get("prompt") or "").strip()
+    model = (body.get("model") or "fal-gpt-image-2").strip()
+    if not prompt:
+        return jsonify({"error": "提示词不能为空"}), 400
+    cap = capability_for(model)
+    reference = None
+    if is_multipart:
+        reference, error = _reference_file()
+        if error:
+            return jsonify({"error": error}), 400
+        if not cap.get("image_to_image"):
+            return jsonify({"error": "当前模型暂未声明参考图能力"}), 400
+    payload = _filtered_payload(body, model, cap)
+    mode = "image-to-image" if reference else "text-to-image"
+    path = "/v1/images/edits" if reference else "/v1/images/generations"
+
+    def call(target):
+        if reference:
+            return upstream_multipart(path, payload, "image", reference[0], reference[2], reference[1],
+                                       base=target["api_base"], key=target["api_key"])
+        return upstream(path, payload, base=target["api_base"], key=target["api_key"])
+
+    failover = False
+    failover_from = ""
+    started = time.time()
+    try:
+        data = call(prov)
+        set_health(prov, "healthy", round((time.time() - started) * 1000))
+    except Exception as primary_error:
+        set_health(prov, error_status(primary_error), round((time.time() - started) * 1000), friendly_error(primary_error))
+        if not config.get("failover_enabled") or not is_safe_failover_error(primary_error):
+            return jsonify({"error": friendly_error(primary_error)}), 502
+        candidates = _providers_for_model(model, prov)
+        if not candidates:
+            return jsonify({"error": f"主中转站失败，备用站没有同名模型（{model}）"}), 502
+        backup = candidates[0]  # at most one fallback request
+        try:
+            started = time.time()
+            data = call(backup)
+            set_health(backup, "healthy", round((time.time() - started) * 1000))
+            failover, failover_from = True, prov["name"]
+            config["active_provider"] = backup["id"]
+            save_config()
+            prov = backup
+        except Exception as backup_error:
+            set_health(backup, error_status(backup_error), round((time.time() - started) * 1000), friendly_error(backup_error))
+            return jsonify({"error": f"主线路与备用线路均不可用：{friendly_error(backup_error)}"}), 502
+
+    elapsed = round(time.time() - started, 1)
+    try:
+        images = _persist_image_results(data, payload, prov, elapsed, {
+            "mode": mode, "reference_used": bool(reference),
+            "reference_name": reference[0] if reference else "",
+            "failover": failover, "failover_from": failover_from,
+        })
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 502
+    response = {"images": images, "elapsed": elapsed, "model": model, "prompt": prompt,
+                "provider": prov["name"], "provider_id": prov["id"], "mode": mode,
+                "failover": failover, "failover_from": failover_from}
+    if failover:
+        response["notice"] = f"主线路「{failover_from}」暂时不可用，已通过「{prov['name']}」完成生成"
+    return jsonify(with_tls_note(response))
 
 
 # ---------- 历史与筛选 ----------
@@ -510,9 +808,15 @@ def history():
             "mtime": mtime,
             "model": meta.get("model", ""),
             "provider": meta.get("provider", ""),
+            "provider_id": meta.get("provider_id", ""),
             "elapsed": meta.get("elapsed"),
             "prompt": meta.get("prompt", ""),
             "size": meta.get("size", ""),
+            "mode": meta.get("mode", "text-to-image"),
+            "reference_used": bool(meta.get("reference_used", False)),
+            "reference_name": meta.get("reference_name", ""),
+            "failover": bool(meta.get("failover", False)),
+            "failover_from": meta.get("failover_from", ""),
             "created_time": meta.get("created_time", time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(mtime))),
         })
     return jsonify({

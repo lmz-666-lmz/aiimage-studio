@@ -27,6 +27,16 @@
   <div class="field">
     <label for="prompt">提示词</label>
     <textarea id="prompt" placeholder="描述你想要的画面…" spellcheck="false"></textarea>
+    <div id="reference-box" class="reference-box">
+      <input id="reference-input" type="file" accept="image/png,image/jpeg,image/webp" hidden>
+      <button id="reference-add" class="reference-add" type="button">＋ 参考图</button>
+      <div id="reference-preview" class="reference-preview" hidden>
+        <img id="reference-thumb" alt="参考图缩略图">
+        <span id="reference-name"></span>
+        <button id="reference-clear" type="button" aria-label="清除参考图">✕</button>
+      </div>
+      <span id="reference-note" class="label-note">拖入或粘贴图片</span>
+    </div>
   </div>
 
   <div class="field" id="prompt-history-field" hidden>
@@ -43,6 +53,16 @@
       <input id="model" type="text" autocomplete="off" spellcheck="false" placeholder="加载中…">
       <button class="combo-toggle" tabindex="-1" aria-label="展开模型列表">▾</button>
       <div class="combo-list" id="model-list" hidden></div>
+    </div>
+  </div>
+
+  <div id="advanced-params" class="field advanced-params" hidden>
+    <label>参数 <span id="capability-label" class="label-note"></span></label>
+    <div class="param-grid">
+      <label id="quality-param">质量<select id="quality"><option value="">默认</option><option value="low">低</option><option value="medium">中</option><option value="high">高</option></select></label>
+      <label id="background-param">背景<select id="background"><option value="">默认</option><option value="auto">自动</option><option value="transparent">透明</option><option value="opaque">不透明</option></select></label>
+      <label id="style-param">风格<select id="style"><option value="">默认</option><option value="vivid">鲜明</option><option value="natural">自然</option></select></label>
+      <label id="n-param">数量<select id="n"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select></label>
     </div>
   </div>
 
@@ -113,6 +133,8 @@
         <dt>生成时间</dt><dd id="lb-time">—</dd>
         <dt>耗时</dt><dd id="lb-elapsed">—</dd>
         <dt>尺寸</dt><dd id="lb-size">—</dd>
+        <dt>模式</dt><dd id="lb-mode">—</dd>
+        <dt>线路</dt><dd id="lb-route">—</dd>
       </dl>
       <h3>Prompt</h3>
       <p id="lb-prompt" class="lb-prompt">—</p>
@@ -165,6 +187,13 @@
       <label>API 中转站 <span class="label-note">点击「使用」切换，模型列表自动刷新</span></label>
       <div id="provider-list" class="provider-list"></div>
       <button id="provider-add" class="ghost prov-add">＋ 添加新的中转站</button>
+    </div>
+
+    <div class="set-field failover-setting">
+      <label for="failover-toggle">线路容错</label>
+      <label class="toggle-row"><input id="failover-toggle" type="checkbox"><span>生成失败时尝试备用中转站</span></label>
+      <p class="label-note">仅在 429 / 502 / 503 / 504 或明确连接失败时切换一次；默认关闭。</p>
+      <button id="health-refresh" class="ghost" type="button">重新检测</button>
     </div>
 
     <div id="provider-form" hidden>
