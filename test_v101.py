@@ -41,6 +41,20 @@ class V101Tests(unittest.TestCase):
         self.assertEqual(payload["background"], "transparent")
         self.assertNotIn("style", payload)
 
+    def test_dalle_values_and_grok_no_size(self):
+        # dall-e-3 只接受官方尺寸与 standard/hd 质量，非法值必须被丢弃
+        cap = studio.capability_for("dall-e-3")
+        self.assertEqual(cap["supported_sizes"], ["1024x1024", "1792x1024", "1024x1792"])
+        payload = studio._filtered_payload({"prompt": "x", "size": "1536x1024", "quality": "hd"}, "dall-e-3", cap)
+        self.assertEqual(payload["size"], "1024x1024")  # 非法尺寸回退第一个官方尺寸
+        self.assertEqual(payload["quality"], "hd")
+        payload = studio._filtered_payload({"prompt": "x", "quality": "high"}, "dall-e-3", cap)
+        self.assertNotIn("quality", payload)  # low/medium/high 不属于 dall-e
+        # xAI 图像接口不接收 size，字段整体不发送
+        payload = studio._filtered_payload({"prompt": "x", "size": "1024x1024", "n": "3"}, "grok-image", studio.capability_for("grok-image"))
+        self.assertNotIn("size", payload)
+        self.assertEqual(payload["n"], 3)
+
     def test_json_generation_and_multipart_edit(self):
         calls = []
 

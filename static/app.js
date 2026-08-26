@@ -138,14 +138,26 @@ function applyIdentity(name, t) {
 }
 
 function capabilityFor(model) {
-  const name = (model || "").toLowerCase();
+  const norm = (s) => s.toLowerCase().replace(/[-_]/g, " ");
+  const name = norm(model || "");
   const matchers = [
     ["gpt-image", "gpt-image"], ["dall-e", "dall-e"], ["nano-banana", "nano-banana"],
     ["banana", "banana"], ["gemini image", "gemini"], ["seedream", "seedream"],
     ["flux", "flux"], ["grok image", "grok image"], ["image", "image"],
   ];
-  for (const [key, matcher] of matchers) if (name.includes(matcher) && capabilityDefs[key]) return { ...capabilityDefs[key], key };
+  for (const [key, matcher] of matchers) if (name.includes(norm(matcher)) && capabilityDefs[key]) return { ...capabilityDefs[key], key };
   return { ...(capabilityDefs.generic || { family: "Generic OpenAI Compatible", text_to_image: true, image_to_image: true, supported_sizes: ["1024x1024", "1536x1024", "1024x1536"], n: true }), key: "generic" };
+}
+
+const PARAM_LABELS = { low: "低", medium: "中", high: "高", standard: "标清", hd: "高清",
+  auto: "自动", transparent: "透明", opaque: "不透明", vivid: "鲜明", natural: "自然" };
+
+function rebuildOptions(sel, values) {
+  if (!sel || !values) return; // 未声明值集 = 沿用现有选项
+  const keep = sel.value;
+  sel.innerHTML = '<option value="">默认</option>' +
+    values.map((v) => `<option value="${v}">${PARAM_LABELS[v] || v}</option>`).join("");
+  sel.value = values.includes(keep) ? keep : "";
 }
 
 function updateCapabilityUI() {
@@ -157,7 +169,12 @@ function updateCapabilityUI() {
     const row = $(`${key}-param`);
     if (row) row.hidden = key === "n" ? !cap.n : !cap[key];
   });
+  rebuildOptions($("quality"), cap.quality_values);
+  rebuildOptions($("background"), cap.background_values);
+  rebuildOptions($("style"), cap.style_values);
   const sizes = cap.supported_sizes || ["1024x1024"];
+  const sizeField = $("size-field");
+  if (sizeField) sizeField.hidden = !(cap.supported_sizes || []).length;
   document.querySelectorAll(".size:not(.theme-btn)").forEach((btn) => {
     const enabled = sizes.includes(btn.dataset.size);
     btn.hidden = !enabled;

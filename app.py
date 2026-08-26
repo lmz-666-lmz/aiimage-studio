@@ -28,11 +28,13 @@ MODEL_CAPABILITIES = {
         "family": "GPT Image", "text_to_image": True, "image_to_image": True,
         "supported_sizes": ["1024x1024", "1536x1024", "1024x1536"],
         "quality": True, "background": True, "style": False, "n": True,
+        "quality_values": ["low", "medium", "high"], "background_values": ["auto", "transparent", "opaque"],
     },
     "dall-e": {
         "family": "DALL-E", "text_to_image": True, "image_to_image": False,
-        "supported_sizes": ["1024x1024", "1536x1024", "1024x1536"],
+        "supported_sizes": ["1024x1024", "1792x1024", "1024x1792"],
         "quality": True, "background": False, "style": True, "n": True,
+        "quality_values": ["standard", "hd"], "style_values": ["vivid", "natural"],
     },
     "nano-banana": {
         "family": "Nano Banana", "text_to_image": True, "image_to_image": True,
@@ -61,7 +63,8 @@ MODEL_CAPABILITIES = {
     },
     "grok image": {
         "family": "Grok Image", "text_to_image": True, "image_to_image": True,
-        "supported_sizes": ["1024x1024", "1536x1024", "1024x1536"],
+        # xAI 官方图像接口不接受 size/quality/style；size 留空 = 不发送该字段
+        "supported_sizes": [],
         "quality": False, "background": False, "style": False, "n": True,
     },
     "image": {
@@ -105,12 +108,14 @@ THEMES = ("darkroom", "ink", "paper")
 def _new_id() -> str:
     return f"provider_{uuid.uuid4().hex[:8]}"
 
-
 def capability_for(model: str | None) -> dict:
+    def _norm(s: str) -> str:
+        # 中转站常用 grok-image / grok_image / GPT.Image 等写法，分隔符统一成空格
+        return s.strip().lower().replace("-", " ").replace("_", " ")
     """Match aliases/substrings so relay-renamed model ids still adapt."""
-    name = (model or "").strip().lower()
+    name = _norm(model or "")
     for key, matcher in CAPABILITY_MATCHERS:
-        if matcher in name:
+        if _norm(matcher) in name:
             return {**MODEL_CAPABILITIES[key], "key": key}
     return {**MODEL_CAPABILITIES["generic"], "key": "generic"}
 
@@ -626,18 +631,19 @@ def _persist_image_results(data: dict, payload: dict, prov: dict, elapsed: float
 
 def _filtered_payload(body: dict, model: str, cap: dict) -> dict:
     payload = {"model": model, "prompt": (body.get("prompt") or "").strip()}
-    if cap.get("supported_sizes") and body.get("size") in cap["supported_sizes"]:
-        payload["size"] = body["size"]
-    else:
-        payload["size"] = cap.get("supported_sizes", ["1024x1024"])[0]
+    if cap.get("supported_sizes"):
+        payload["size"] = body["size"] if body.get("size") in cap["supported_sizes"] else cap["supported_sizes"][0]
+    # supported_sizes 为空 = 该模型族不接收 size（如 grok image），整个字段不发
     if cap.get("n"):
         try:
             payload["n"] = min(4, max(1, int(body.get("n", 1))))
         except (TypeError, ValueError):
             payload["n"] = 1
     for key in ("quality", "background", "style"):
-        if cap.get(key) and body.get(key):
-            payload[key] = body[key]
+        value = body.get(key)
+        allowed = cap.get(f"{key}_values")
+        if cap.get(key) and value and (not allowed or value in allowed):
+            payload[key] = value
     return payload
 
 
