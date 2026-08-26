@@ -73,7 +73,7 @@ python app.py
 
 ## ⚙️ 配置
 
-配置保存在本地 `config.json`，升级不会删除旧字段、旧中转站或用户历史。下面是脱敏示例，真实 API Key 不要提交到仓库：
+配置保存在本地 `config.json`（首次使用可复制仓库里的 `config.example.json` 为 `config.json` 再填入自己的地址和密钥），升级不会删除旧字段、旧中转站或用户历史。下面是脱敏示例，真实 API Key 不要提交到仓库：
 
 ```json
 {

@@ -1,0 +1,15 @@
+{
+  "name": "拾光",
+  "theme": "darkroom",
+  "failover_enabled": false,
+  "providers": [
+    {
+      "id": "provider_1",
+      "name": "官方中转",
+      "api_base": "https://example.com",
+      "api_key": "sk-xxxxxxxxxxxxxxxxxxxxxxxx",
+      "models": ["gpt-image-1"]
+    }
+  ],
+  "active_provider": "provider_1"
+}
