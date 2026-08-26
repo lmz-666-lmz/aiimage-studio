@@ -758,6 +758,7 @@ async function gen() {
     wallItems.unshift(...images.map(withResponseMeta));
     pushPromptHistory(prompt);
     pushRecentModel(d.model);
+    if (d.notice) setGenMsg(d.notice); // 主线路故障已由备用线路完成的提示
     if (referenceFile) clearReference();
   } catch (e) {
     card.remove();

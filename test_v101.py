@@ -79,8 +79,9 @@ class V101Tests(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertEqual(calls[1][0], "/v1/images/edits")
             self.assertEqual(response.json["mode"], "image-to-image")
-            meta = next(studio.OUTPUT_DIR.glob("*.json")).read_text(encoding="utf-8")
-            self.assertIn('"reference_used": true', meta)
+            metas = [p.read_text(encoding="utf-8") for p in studio.OUTPUT_DIR.glob("*.json")]
+            self.assertIn('"reference_used": true', "".join(metas))  # 图生图的 sidecar 必须记录参考图
+            self.assertIn('"mode": "image-to-image"', "".join(metas))
 
     def test_reference_validation_and_known_unsupported(self):
         response = self.client.post("/api/generate", data={"prompt": "x", "model": "dall-e-3", "image": (io.BytesIO(b"x"), "ref.txt", "text/plain")}, content_type="multipart/form-data")

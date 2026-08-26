@@ -211,13 +211,13 @@ def active_provider() -> dict | None:
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
 
+import threading
 
-tls_note = None  # 本请求内若跳过了证书校验，记录提示语
+_tls_note = threading.local()  # 每请求线程独立，避免并发时证书提示串扰
 
 
 def _fetch(req: urllib.request.Request, timeout: int):
     """发起请求。证书校验失败时（过期/自签名的小站很常见）自动跳过重试。返回 (字节, Content-Type)。"""
-    global tls_note
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return resp.read(), resp.headers.get("Content-Type", "")
@@ -229,7 +229,7 @@ def _fetch(req: urllib.request.Request, timeout: int):
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
-        tls_note = "该中转站的 HTTPS 证书已过期或无效，已自动跳过证书校验；密钥仍按原样发送，请注意风险"
+        _tls_note.value = "该中转站的 HTTPS 证书已过期或无效，已自动跳过证书校验；密钥仍按原样发送，请注意风险"
         with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
             return resp.read(), resp.headers.get("Content-Type", "")
 
@@ -237,8 +237,7 @@ def _fetch(req: urllib.request.Request, timeout: int):
 def upstream(path: str, payload: dict | None = None, timeout: int = 300,
              base: str | None = None, key: str | None = None):
     """请求中转站 API。"""
-    global tls_note
-    tls_note = None
+    _tls_note.value = None  # 每次上游调用前重置本线程的证书提示
     prov = active_provider() or {}
     base = (base if base is not None else prov.get("api_base", "")).rstrip("/")
     if base.endswith("/v1"):  # 兼容用户粘贴带 /v1 的地址，避免拼出 /v1/v1
@@ -261,8 +260,9 @@ def upstream(path: str, payload: dict | None = None, timeout: int = 300,
 
 
 def with_tls_note(payload: dict) -> dict:
-    if tls_note:
-        payload["warning"] = tls_note
+    note = getattr(_tls_note, "value", None)
+    if note:
+        payload["warning"] = note
     return payload
 
 def friendly_error(e: Exception) -> str:
@@ -558,8 +558,7 @@ def upstream_multipart(path: str, fields: dict, file_field: str, filename: str,
                        blob: bytes, mime: str, timeout: int = 300,
                        base: str | None = None, key: str | None = None):
     """Small stdlib-only multipart encoder for OpenAI-compatible image edits."""
-    global tls_note
-    tls_note = None
+    _tls_note.value = None
     prov = active_provider() or {}
     base = (base if base is not None else prov.get("api_base", "")).rstrip("/")
     if base.endswith("/v1"):
@@ -595,6 +594,15 @@ def _ext_from(content_type: str, url: str) -> str:
     return ".png"
 
 
+def _ext_from_blob(blob: bytes) -> str:
+    """b64 返回没有 Content-Type，按真实字节判断格式，避免 PNG 被存成 .webp。"""
+    if blob.startswith(b"\x89PNG"): return ".png"
+    if blob.startswith(b"\xff\xd8"): return ".jpg"
+    if blob[:4] == b"RIFF" and blob[8:12] == b"WEBP": return ".webp"
+    if blob[:3] == b"GIF": return ".gif"
+    return ".png"
+
+
 def _persist_image_results(data: dict, payload: dict, prov: dict, elapsed: float,
                            extra_meta: dict | None = None):
     items = data.get("data") or []
@@ -612,8 +620,9 @@ def _persist_image_results(data: dict, payload: dict, prov: dict, elapsed: float
                 "failover": bool(extra_meta.get("failover", False)),
                 "failover_from": extra_meta.get("failover_from", "")}
         if item.get("b64_json"):
-            name = f"{time.strftime('%Y%m%d_%H%M%S')}_{i}.webp"
             blob = base64.b64decode(item["b64_json"])
+            # 时间戳只到秒，追加短随机段防止同秒多次生成互相覆盖
+            name = f"{time.strftime('%Y%m%d_%H%M%S')}_{i}_{uuid.uuid4().hex[:4]}{_ext_from_blob(blob)}"
             (OUTPUT_DIR / name).write_bytes(blob)
             (OUTPUT_DIR / f"{name}.json").write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
             results.append({"url": f"/outputs/{name}", "name": name, **meta})
@@ -621,7 +630,7 @@ def _persist_image_results(data: dict, payload: dict, prov: dict, elapsed: float
             req = urllib.request.Request(item["url"], headers={"User-Agent": "Mozilla/5.0"})
             try:
                 blob, ct = _fetch(req, 120)
-                name = f"{time.strftime('%Y%m%d_%H%M%S')}_{i}{_ext_from(ct, item['url'])}"
+                name = f"{time.strftime('%Y%m%d_%H%M%S')}_{i}_{uuid.uuid4().hex[:4]}{_ext_from(ct, item['url'])}"
                 (OUTPUT_DIR / name).write_bytes(blob)
                 (OUTPUT_DIR / f"{name}.json").write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
                 results.append({"url": f"/outputs/{name}", "name": name, **meta})
