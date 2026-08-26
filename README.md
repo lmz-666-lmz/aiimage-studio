@@ -1,19 +1,24 @@
 <div align="center">
-
-# Image Studio
-
-### 🌕 拾光 · 本地生图工作台
-
-**输入一句话，看照片在暗房里慢慢显影**
-
-`Flask` · `原生 JS` · `GSAP` · `OpenAI 兼容中转站` · `无构建依赖`
-
-[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
-[![Flask](https://img.shields.io/badge/Flask-3.x-9B59B6?logo=flask&logoColor=white)](https://flask.palletsprojects.com/)
-[![License](https://img.shields.io/badge/License-MIT-green)]()
-
-[解决的问题](#-解决了什么问题) · [快速开始](#-快速开始) · [预览](#-效果预览) · [主题](#-三套主题) · [配置](#️-配置) · [常见问题](#-常见问题)
-
+  <img src="static/assets/logo.png" alt="Image Studio · 拾光" width="420">
+  <h1>Image Studio</h1>
+  <p><b>🌕 拾光 · 本地生图工作台</b></p>
+  <p><b>输入一句话，看照片在暗房里慢慢显影</b></p>
+  <p>
+    <code>Flask</code> · <code>原生 JS</code> · <code>GSAP</code> · <code>OpenAI 兼容中转站</code> · <code>无构建依赖</code>
+  </p>
+  <p>
+    <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white" alt="Python 3.10+"></a>
+    <a href="https://flask.palletsprojects.com/"><img src="https://img.shields.io/badge/Flask-3.x-9B59B6?logo=flask&logoColor=white" alt="Flask 3.x"></a>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green" alt="MIT License"></a>
+  </p>
+  <p>
+    <a href="#-解决了什么问题">解决的问题</a> ·
+    <a href="#-快速开始">快速开始</a> ·
+    <a href="#-效果预览">预览</a> ·
+    <a href="#-三套主题">主题</a> ·
+    <a href="#️-配置">配置</a> ·
+    <a href="#-常见问题">常见问题</a>
+  </p>
 </div>
 
 ---
@@ -26,12 +31,12 @@
 - **配置门槛高** —— 密钥、Base URL、模型名散落在环境变量和脚本里，想快速试一个新模型，得先写一遍调用代码
 - **Agent 工具的盲区** —— Codex、Cursor 这类编码 Agent 擅长写代码，但「调生图 API → 存文件 → 打开看效果 → 不满意调参数重来」这条链路每次都要现写脚本：看不到图、管不住历史，迭代效率很低
 
-**Image Studio 把这些一次性解决**：填一个中转站地址 + 一把密钥，所有 OpenAI 兼容的生图模型即插即用——
+**Image Studio 把这些一次性解决**：填入中转站地址 + 密钥，所有 OpenAI 兼容的生图模型即插即用；多个中转站可并存管理，一键切换——
 
 | 没有它 | 有了它 |
 |---|---|
 | 每个模型写一遍调用脚本 | 模型列表自动拉取，下拉切换 |
-| 参数和密钥散落在代码里 | 设置面板统一管理，改完即生效 |
+| 参数和密钥散落在代码里 | 多中转站统一管理，一键切换，改完即生效 |
 | 生成结果散落在临时目录 | 瀑布流历史墙，模型/耗时/提示词全标注 |
 | 看图要手动打开文件 | 灯箱缩放平移，← → 键对比不同模型的出图 |
 
@@ -41,47 +46,53 @@
 
 | | 功能 | 说明 |
 |---|---|---|
-| 🎨 | **多模型生图** | 自动拉取中转站全部生图模型（gpt-image / nano-banana / seedream / grok-image…），**输入即筛选**，也可直接手填模型名 |
-| 🖼 | **瀑布流印相墙** | 小红书式自适应瀑布流，卡片悬浮上浮；每张图标注**生成模型与耗时**，悬停可看完整提示词 |
+| 🎨 | **多模型生图** | 自动拉取中转站全部生图模型（gpt-image / nano-banana / seedream / grok-image…），**输入即筛选**、最近使用置顶，也可直接手填模型名 |
+| 🔌 | **多中转站管理** | 添加 / 编辑 / 删除 / 一键切换任意多个 OpenAI 兼容中转站，切换后模型列表自动刷新；旧版单站配置自动迁移 |
+| 🖼 | **瀑布流印相墙** | 小红书式自适应瀑布流，卡片悬浮上浮；每张图标注**生成模型、耗时与日期**，悬停可看完整提示词 |
+| 🔎 | **历史筛选** | 关键词搜提示词，按模型 / API 来源 / 时间（今天·最近7天）过滤，支持最新 / 最快 / 模型名排序 |
 | 🌅 | **显影动画** | 生成中显示红光扫过的相纸并实时计时，图片到达时从模糊灰色「显影」为清晰（GSAP 编排，尊重系统减弱动效） |
-| 🔍 | **灯箱查看器** | 滚轮以光标为中心缩放（20%–1000%）、拖拽平移、双击缩放、**← → 方向键循环切换**、下载与删除 |
+| 🔍 | **灯箱查看器** | 滚轮以光标为中心缩放（20%–1000%）、拖拽平移、双击缩放、**← → 方向键循环切换**；右侧信息面板展示模型 / 来源 / 时间 / 耗时 / 尺寸 / Prompt，支持复制与一键回填 |
 | 📄 | **分页浏览** | 每页 12 张，页码 + 跳页，底部常显「共 N 张 · 每页 12 张 · 第 X / Y 页」 |
 | 🌄 | **三套主题** | 暮金 / 黛夜 / 宣纸，**点击即换、自动保存**，无需刷新 |
-| ⚙️ | **设置面板** | 名称、主题、API 地址与密钥全部页面内可改，即时持久化；改站点后模型列表自动刷新 |
-| 💾 | **本地留存** | 图片自动存入 `outputs/`，元数据（模型/耗时/提示词/尺寸）写入同名 `.json` |
+| ⚙️ | **设置面板** | 名称、主题、中转站列表全部页面内可改，即时持久化 |
+| 💾 | **本地留存** | 图片自动存入 `outputs/`，元数据（模型 / 来源 / 耗时 / 提示词 / 尺寸 / 时间）写入同名 `.json` |
 
 ## 🚀 快速开始
 
 ```bash
-git clone <this-repo>
+git clone https://github.com/lmz-666-lmz/image-studio.git
 cd image-studio
-pip install flask
+pip install -r requirements.txt
 python app.py          # 自动打开 http://127.0.0.1:7860
 ```
 
 首次进入会自动弹出设置面板：
 
-1. 填入中转站地址（任意 OpenAI 兼容中转，如 new-api / one-api 部署）
-2. 填入 API 密钥，点「测试连接」验证
-3. 点「保存 API 信息」，写一句提示词，`Ctrl + Enter` 开始生成 ✨
+1. 点「＋ 添加新的中转站」，填入地址（任意 OpenAI 兼容中转，如 new-api / one-api 部署）和密钥
+2. 点「测试连接」验证，「保存中转站」后自动启用并拉取模型列表
+3. 写一句提示词，`Ctrl + Enter` 开始生成 ✨
 
 ## 🖼 效果预览
 
 <div align="center">
 
-**暮金 · 瀑布流印相墙** —— 暖炭底色，烛金安全灯；生成中的相纸红光扫过、实时计时，完成后从模糊灰色「显影」为清晰
+**主界面 · 暮金** —— 左侧生成轨，右侧瀑布流印相墙；顶部筛选栏，每张卡片标注模型 / 耗时 / 日期
 
-![暮金主题](screenshots/mujin.png)
+![主界面](screenshots/wall-darkroom.png)
 
-**灯箱** —— 滚轮缩放 · 拖拽平移 · ← → 切换 · 下载删除
+**灯箱查看器** —— 滚轮缩放 · 拖拽平移 · ← → 切换；右侧信息面板记录模型 / 来源 / 时间 / 耗时 / 尺寸 / Prompt，支持复制与一键回填
 
-![灯箱](screenshots/lightbox.png)
+![灯箱信息面板](screenshots/lightbox-info.png)
 
-**设置** —— 名称 / 主题 / API 一站式管理
-
-![设置面板](screenshots/settings.png)
+<table>
+  <tr>
+    <td width="50%" align="center"><img src="screenshots/settings-providers.png" alt="显影动画"><br><sub><b>显影动画</b> —— 添加 / 编辑 / 一键切换</sub></td>
+    <td width="50%" align="center"><img src="screenshots/generating.png" alt="多中转站管理"><br><sub><b>多中转站管理</b> —— 红光扫过，实时计时</sub></td>
+  </tr>
+</table>
 
 </div>
+
 
 ## 🌄 三套主题
 
@@ -93,13 +104,13 @@ python app.py          # 自动打开 http://127.0.0.1:7860
 
 <div align="center">
 
-| 黛夜 | 宣纸 |
-|:---:|:---:|
-| ![黛夜](screenshots/daiye.png) | ![宣纸](screenshots/xuanzhi.png) |
+<p>
+  <img src="screenshots/wall-darkroom.png" width="32%" alt="暮金">
+  <img src="screenshots/wall-ink.png" width="32%" alt="黛夜">
+  <img src="screenshots/wall-paper.png" width="32%" alt="宣纸">
+</p>
 
-**宣纸 · 初始页** —— 空状态也干净
-
-![宣纸初始页](screenshots/empty.png)
+<sub>暮金 · 黛夜 · 宣纸 —— 点击即换，自动保存，无需刷新</sub>
 
 </div>
 
@@ -109,10 +120,18 @@ python app.py          # 自动打开 http://127.0.0.1:7860
 
 ```jsonc
 {
-  "name": "拾光",          // 工作台的中文显示名
-  "theme": "darkroom",     // darkroom 暮金 / ink 黛夜 / paper 宣纸
-  "api_base": "https://…", // OpenAI 兼容中转站地址
-  "api_key": "sk-…"        // 对应密钥
+  "name": "拾光",              // 工作台的中文显示名
+  "theme": "darkroom",         // darkroom 暮金 / ink 黛夜 / paper 宣纸
+  "providers": [               // 中转站列表，可有多条
+    {
+      "id": "provider_1",
+      "name": "官方中转",
+      "api_base": "https://…", // OpenAI 兼容中转站地址
+      "api_key": "sk-…",       // 对应密钥
+      "models": []             // 该站可用生图模型（自动拉取缓存）
+    }
+  ],
+  "active_provider": "provider_1"
 }
 ```
 
@@ -120,12 +139,15 @@ python app.py          # 自动打开 http://127.0.0.1:7860
 
 ```
 image-studio/
-├── app.py              # Flask 后端：生图代理、历史分页、设置持久化
-├── config.json         # 你的配置（含密钥，勿提交）
+├── app.py              # Flask 后端：中转站管理、生图代理、历史筛选、设置持久化
+├── requirements.txt    # Python 依赖（仅 Flask）
+├── LICENSE             # MIT License
+├── config.json         # 你的配置（含密钥，勿提交，已加入 .gitignore）
 ├── static/
 │   ├── index.html      # 页面结构
 │   ├── style.css       # 三主题 + 瀑布流 + 灯箱样式
-│   └── app.js          # 生成 / 分页 / 灯箱缩放切换 / GSAP 动效
+│   ├── app.js          # 生成 / 分页筛选 / 中转站管理 / 灯箱缩放切换 / GSAP 动效
+│   └── assets/         # Logo 与浏览器标签页图标（favicon）
 ├── screenshots/        # 效果图
 └── outputs/            # 生成图片自动保存到这里
 ```
@@ -147,14 +169,28 @@ image-studio/
 <details>
 <summary><b>换了一个中转站？</b></summary>
 
-设置里改地址和密钥 → 保存 → 模型列表自动重拉，无需重启。
+设置里「＋ 添加新的中转站」或对已有条目点「编辑」→ 保存。多个中转站并存时，点「使用」即可切换，模型列表自动重拉，无需重启。
+</details>
+
+<details>
+<summary><b>升级到新版后原来的 API 配置还在吗？</b></summary>
+在。首次启动会自动把旧的 `api_base` / `api_key` 迁移成一个名为「默认中转」的中转站，并设为使用中。
+</details>
+
+<details>
+<summary><b>中转站地址要带 <code>/v1</code> 吗？</b></summary>
+
+带不带都可以。应用会自动补全 `/v1/models` 等路径，填 `https://example.com` 或 `https://example.com/v1` 效果相同。
+</details>
+
+<details>
+<summary><b>提示「HTTPS 证书已过期或无效」？</b></summary>
+
+部分小型中转站的证书维护不规范，应用遇到证书错误会自动跳过校验完成请求，并在界面给出提示。密钥仍按原样发送，介意风险的话建议换用证书正常的站点。
 </details>
 
 <details>
 <summary><b>为什么中文名叫「拾光」？</b></summary>
-<<<<<<< HEAD
-=======
-
 拾起光，也谐音「时光」——每一张生成的照片，都是被拾起的一段光。
 </details>
 

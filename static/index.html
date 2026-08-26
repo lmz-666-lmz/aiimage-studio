@@ -7,6 +7,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@600;900&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="icon" type="image/x-icon" href="/static/assets/favicon.ico">
+<link rel="icon" type="image/png" sizes="64x64" href="/static/assets/favicon.png">
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -25,6 +27,14 @@
   <div class="field">
     <label for="prompt">提示词</label>
     <textarea id="prompt" placeholder="描述你想要的画面…" spellcheck="false"></textarea>
+  </div>
+
+  <div class="field" id="prompt-history-field" hidden>
+    <div class="ph-head">
+      <label>Prompt 历史 <span class="label-note">点击回填 · ✕ 删除单条</span></label>
+      <button id="ph-clear" class="ph-clear" type="button">清空</button>
+    </div>
+    <div id="prompt-history" class="chips"></div>
   </div>
 
   <div class="field">
@@ -50,6 +60,21 @@
 </aside>
 
 <main class="wall">
+  <div class="filters" id="filters">
+    <input id="f-q" type="text" placeholder="搜索提示词…" spellcheck="false">
+    <select id="f-model"><option value="">全部模型</option></select>
+    <select id="f-provider"><option value="">全部来源</option></select>
+    <select id="f-range">
+      <option value="all">全部时间</option>
+      <option value="today">今天</option>
+      <option value="week">最近7天</option>
+    </select>
+    <select id="f-sort">
+      <option value="newest">最新生成</option>
+      <option value="fastest">最快生成</option>
+      <option value="model">模型名称</option>
+    </select>
+  </div>
   <div id="gallery" class="masonry"></div>
   <div id="empty" class="empty">
     <div class="empty-mark">◌</div>
@@ -73,27 +98,45 @@
 
 <!-- 灯箱：滚轮/按钮缩放、拖拽平移、双击缩放 -->
 <div id="lightbox" class="lightbox" hidden>
-  <figure class="frame">
+<figure class="frame">
+  <div class="lb-body">
     <div class="stage">
       <img id="lb-img" alt="" draggable="false">
       <button id="lb-prev" class="lb-nav" aria-label="上一张">‹</button>
       <button id="lb-next" class="lb-nav" aria-label="下一张">›</button>
     </div>
-    <figcaption class="bar">
-      <span class="bar-left">
-        <button class="zoom-btn" id="zoom-out" aria-label="缩小">−</button>
-        <span id="zoom-level">100%</span>
-        <button class="zoom-btn" id="zoom-in" aria-label="放大">+</button>
-        <button class="zoom-btn wide" id="zoom-reset">适应</button>
-      </span>
-      <span id="lb-name"></span>
-      <span class="bar-actions">
-        <a id="lb-dl" download>下载原图</a>
+    <aside class="lb-info">
+      <h3>生成信息</h3>
+      <dl class="lb-facts">
+        <dt>模型</dt><dd id="lb-model">—</dd>
+        <dt>API 来源</dt><dd id="lb-provider">—</dd>
+        <dt>生成时间</dt><dd id="lb-time">—</dd>
+        <dt>耗时</dt><dd id="lb-elapsed">—</dd>
+        <dt>尺寸</dt><dd id="lb-size">—</dd>
+      </dl>
+      <h3>Prompt</h3>
+      <p id="lb-prompt" class="lb-prompt">—</p>
+      <div class="lb-info-actions">
+        <button id="lb-copy" class="zoom-btn wide">复制 Prompt</button>
+        <button id="lb-reuse" class="zoom-btn wide">重新使用</button>
         <button id="lb-del" class="danger">删除</button>
-        <button id="lb-close">关闭</button>
-      </span>
-    </figcaption>
-  </figure>
+      </div>
+    </aside>
+  </div>
+  <figcaption class="bar">
+    <span class="bar-left">
+      <button class="zoom-btn" id="zoom-out" aria-label="缩小">−</button>
+      <span id="zoom-level">100%</span>
+      <button class="zoom-btn" id="zoom-in" aria-label="放大">+</button>
+      <button class="zoom-btn wide" id="zoom-reset">适应</button>
+    </span>
+    <span id="lb-name"></span>
+    <span class="bar-actions">
+      <a id="lb-dl" download>下载原图</a>
+      <button id="lb-close">关闭</button>
+    </span>
+  </figcaption>
+</figure>
 </div>
 
 <!-- 设置 -->
@@ -119,18 +162,32 @@
     </div>
 
     <div class="set-field">
-      <label for="set-base">API 中转站地址</label>
-      <input id="set-base" type="text" spellcheck="false" placeholder="https://…">
+      <label>API 中转站 <span class="label-note">点击「使用」切换，模型列表自动刷新</span></label>
+      <div id="provider-list" class="provider-list"></div>
+      <button id="provider-add" class="ghost prov-add">＋ 添加新的中转站</button>
     </div>
 
-    <div class="set-field">
-      <label for="set-key">API 密钥</label>
-      <input id="set-key" type="password" spellcheck="false" autocomplete="off" placeholder="sk-…">
+    <div id="provider-form" hidden>
+      <div class="set-field">
+        <label for="pf-name">中转站名称</label>
+        <input id="pf-name" type="text" maxlength="20" placeholder="如：官方中转">
+      </div>
+      <div class="set-field">
+        <label for="pf-base">API 地址</label>
+        <input id="pf-base" type="text" spellcheck="false" placeholder="https://…">
+      </div>
+      <div class="set-field">
+        <label for="pf-key">API 密钥</label>
+        <input id="pf-key" type="password" spellcheck="false" autocomplete="off" placeholder="sk-…">
+      </div>
+      <div class="set-actions">
+        <button id="pf-save" class="ghost solid">保存中转站</button>
+        <button id="pf-test" class="ghost">测试连接</button>
+        <button id="pf-cancel" class="ghost">取消</button>
+      </div>
     </div>
 
     <div class="set-actions">
-      <button id="set-save" class="ghost solid">保存 API 信息</button>
-      <button id="set-test" class="ghost">测试连接</button>
       <span id="set-msg" class="set-msg"></span>
     </div>
 

@@ -1,13 +1,86 @@
-/* 暗房 · 前端逻辑：生成 / 瀑布流分页 / 设置 / 可搜索模型 / GSAP 动效 */
+/* 拾光 · 前端逻辑：生成 / 瀑布流分页与筛选 / 中转站管理 / 灯箱信息面板 / GSAP 动效 */
 const $ = (id) => document.getElementById(id);
 
 let busy = false;
 let size = "1024x1024";
 let page = 1, pages = 1, total = 0;
 let modelList = [];
-let wallItems = []; // 当前墙上的图片（新→旧），供灯箱左右切换
+let providers = [];          // [{id,name,api_base,api_key,models}]
+let activePid = "";
+let editingPid = "";         // 正在编辑的中转站，空 = 新增
+let wallItems = [];          // 当前墙上的图片（新→旧），供灯箱左右切换
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const gsapOK = typeof gsap !== "undefined" && !reduceMotion;
+
+/* ---------- 本地轻量记忆 ---------- */
+const PROMPT_KEY = "is_prompt_history"; // Prompt 与中转站无关，全局一份
+
+function recentKey() { // 最近使用的模型按中转站隔离，避免跨站选到不存在的模型
+  return `is_recent_models:${activePid || "none"}`;
+}
+
+function lsGet(key, fallback = []) {
+  try { return JSON.parse(localStorage.getItem(key)) || fallback; } catch { return fallback; }
+}
+function lsSet(key, val) {
+  try { localStorage.setItem(key, JSON.stringify(val)); } catch { /* 隐私模式忽略 */ }
+}
+function pushPromptHistory(text) {
+  const t = text.trim();
+  if (!t) return;
+  const list = lsGet(PROMPT_KEY).filter((p) => p !== t);
+  list.unshift(t);
+  lsSet(PROMPT_KEY, list.slice(0, 20));
+  renderPromptHistory();
+}
+function pushRecentModel(name) {
+  if (!name) return;
+  const list = lsGet(recentKey()).filter((m) => m !== name);
+  list.unshift(name);
+  lsSet(recentKey(), list.slice(0, 5));
+}
+
+function renderPromptHistory() {
+  const list = lsGet(PROMPT_KEY);
+  const field = $("prompt-history-field");
+  const box = $("prompt-history");
+  field.hidden = !list.length;
+  box.innerHTML = "";
+  for (const p of list.slice(0, 8)) {
+    const chip = document.createElement("span");
+    chip.className = "chip";
+    chip.tabIndex = 0;
+    chip.setAttribute("role", "button");
+    chip.title = p;
+    chip.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("prompt").value = p; $("prompt").focus(); }
+    });
+    const txt = document.createElement("span");
+    txt.className = "chip-text";
+    txt.textContent = p;
+    const del = document.createElement("button");
+    del.type = "button";
+    del.className = "chip-del";
+    del.textContent = "✕";
+    del.title = "删除这条";
+    del.setAttribute("aria-label", "删除这条 Prompt 历史");
+    del.addEventListener("click", (e) => {
+      e.stopPropagation();
+      lsSet(PROMPT_KEY, lsGet(PROMPT_KEY).filter((t) => t !== p));
+      renderPromptHistory();
+    });
+    chip.append(txt, del);
+    chip.addEventListener("click", () => { $("prompt").value = p; $("prompt").focus(); });
+    box.appendChild(chip);
+  }
+}
+
+$("ph-clear").addEventListener("click", () => {
+  if (!lsGet(PROMPT_KEY).length) return;
+  if (!confirm("清空全部 Prompt 历史？（不影响已生成的图片）")) return;
+  lsSet(PROMPT_KEY, []);
+  renderPromptHistory();
+});
 
 /* ---------- GSAP 动效 ---------- */
 function enterCard(el, delay = 0) {
@@ -31,14 +104,16 @@ async function loadSettings() {
     const s = await (await fetch("/api/settings")).json();
     applyIdentity(s.name, s.theme);
     $("set-name").value = s.name;
-    $("set-base").value = s.api_base || "";
-    $("set-key").value = s.api_key || "";
+    providers = s.providers || [];
+    activePid = s.active_provider || "";
+    renderProviders();
     markTheme(s.theme);
-    const noApi = !s.api_base || !s.api_key;
+    const noApi = !providers.length;
     $("need-api").hidden = !noApi;
     if (noApi && $("settings").hidden) {
       $("settings").hidden = false; // 首次使用直接带出设置
-      $("set-msg").textContent = "先填写中转站地址和密钥，保存后即可生图";
+      $("set-msg").textContent = "先添加一个 API 中转站，保存后即可生图";
+      openProviderForm("");
     }
   } catch { /* 用默认值 */ }
 }
@@ -55,7 +130,174 @@ function markTheme(t) {
   document.querySelectorAll(".theme-btn").forEach((b) => b.classList.toggle("on", b.dataset.theme === t));
 }
 
-/* 主题：点击即换 + 静默保存 */
+/* ---------- 中转站管理 ---------- */
+function maskKey(key) {
+  if (!key) return "未填写";
+  return key.length > 12 ? `${key.slice(0, 5)}••••${key.slice(-4)}` : "••••";
+}
+
+function renderProviders() {
+  const box = $("provider-list");
+  box.innerHTML = "";
+  if (!providers.length) {
+    box.innerHTML = '<p class="prov-empty">还没有中转站，点下方按钮添加。</p>';
+    return;
+  }
+  for (const p of providers) {
+    const card = document.createElement("div");
+    card.className = "prov-card" + (p.id === activePid ? " on" : "");
+    const isActive = p.id === activePid;
+    card.innerHTML = `
+      <div class="prov-head">
+        <span class="prov-name">${escapeHtml(p.name)}</span>
+        ${isActive ? '<span class="prov-tag">使用中</span>' : ""}
+        <span style="flex:1"></span>
+        <button class="prov-btn use ${isActive ? "on" : ""}" ${isActive ? "disabled" : ""}>${isActive ? "使用中" : "使用"}</button>
+        <button class="prov-btn edit">编辑</button>
+        <button class="prov-btn danger del">删除</button>
+      </div>
+      <div class="prov-facts">
+        <span><b>地址</b>${escapeHtml(p.api_base || "未填写")}</span>
+        <span><b>Key</b>${maskKey(p.api_key)}</span>
+        <span><b>模型</b>${(p.models || []).length} 个</span>
+      </div>`;
+    card.querySelector(".use").addEventListener("click", () => activateProvider(p.id));
+    card.querySelector(".edit").addEventListener("click", () => openProviderForm(p.id));
+    card.querySelector(".del").addEventListener("click", () => deleteProvider(p.id, p.name));
+    box.appendChild(card);
+  }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function openProviderForm(pid) {
+  editingPid = pid;
+  const p = providers.find((x) => x.id === pid);
+  $("provider-form").hidden = false;
+  $("pf-name").value = p ? p.name : "";
+  $("pf-base").value = p ? p.api_base : "";
+  $("pf-key").value = p ? p.api_key : "";
+  $("pf-name").focus();
+}
+
+function closeProviderForm() {
+  editingPid = "";
+  $("provider-form").hidden = true;
+}
+
+function setMsg(text, cls = "") {
+  const m = $("set-msg");
+  m.className = "set-msg" + (cls ? ` ${cls}` : "");
+  m.textContent = text || "";
+}
+
+$("provider-add").addEventListener("click", () => openProviderForm(""));
+$("pf-cancel").addEventListener("click", closeProviderForm);
+
+$("pf-save").addEventListener("click", async () => {
+  setMsg("保存中…");
+  const wasEdit = !!editingPid;
+  try {
+    const r = await fetch("/api/providers", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: editingPid || undefined,
+        name: $("pf-name").value.trim(),
+        api_base: $("pf-base").value.trim(),
+        api_key: $("pf-key").value.trim(),
+      }),
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    providers = d.providers || [];
+    activePid = d.active_provider || "";
+    renderProviders();
+    closeProviderForm();
+    setMsg(wasEdit ? "中转站已更新" : "中转站已添加并启用", "ok");
+    $("need-api").hidden = !!providers.length;
+    await loadModels(); // 模型拉取结果只反映在输入框占位符，不覆盖上面的成功提示
+  } catch (e) { setMsg(e.message, "err"); }
+});
+
+$("pf-test").addEventListener("click", async () => {
+  setMsg("连接中…");
+  try {
+    const r = await fetch("/api/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        api_base: $("pf-base").value.trim(),
+        api_key: $("pf-key").value.trim(),
+      }),
+    });
+    const d = await r.json();
+    if (d.ok) { setMsg(`连接成功，${d.models} 个模型`, "ok"); }
+    else setMsg("失败：" + d.error, "err");
+  } catch (e) { setMsg(e.message, "err"); }
+});
+
+async function activateProvider(pid) {
+  setMsg("切换中转站…");
+  try {
+    const r = await fetch("/api/providers/activate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: pid }),
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    providers = d.providers || [];
+    activePid = d.active_provider || "";
+    renderProviders();
+    modelList = d.models || [];
+    modelsLoading = false;
+    modelInput.placeholder = modelList.length ? "输入筛选或直接填写模型名" : "未发现生图模型，可手动填写";
+    if (modelList.length) modelInput.value = modelList.includes("fal-gpt-image-2") ? "fal-gpt-image-2" : modelList[0];
+    if (!modelListBox.hidden) renderModelList();
+    setMsg(d.warning ? `已切换，但拉取模型失败：${d.warning}` : "已切换，模型列表已刷新", d.warning ? "err" : "ok");
+  } catch (e) { setMsg(e.message, "err"); }
+}
+
+async function deleteProvider(pid, name) {
+  if (!confirm(`删除中转站「${name}」？不会删除已生成的图片。`)) return;
+  try {
+    const r = await fetch("/api/providers/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: pid }),
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    const wasActive = pid === activePid;
+    providers = d.providers || [];
+    activePid = d.active_provider || "";
+    renderProviders();
+    setMsg(`已删除「${name}」`, "ok");
+    if (wasActive) loadModels();
+  } catch (e) { setMsg(e.message, "err"); }
+}
+
+/* ---------- 名称与主题 ---------- */
+$("name-save").addEventListener("click", async () => {
+  setMsg("保存中…");
+  try {
+    const r = await fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: $("set-name").value.trim() }),
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    applyIdentity(d.name, null);
+    setMsg("名称已保存", "ok");
+  } catch (e) { setMsg(e.message, "err"); }
+});
+
+$("set-name").addEventListener("keydown", (e) => { if (e.key === "Enter") $("name-save").click(); });
+
 document.querySelectorAll(".theme-btn").forEach((btn) => {
   btn.addEventListener("click", async () => {
     const t = btn.dataset.theme;
@@ -73,81 +315,11 @@ document.querySelectorAll(".theme-btn").forEach((btn) => {
 });
 
 const settingsEl = $("settings");
-$("open-settings").addEventListener("click", () => { settingsEl.hidden = false; $("set-msg").textContent = ""; });
-$("set-close").addEventListener("click", () => { settingsEl.hidden = true; loadSettings(); });
-settingsEl.addEventListener("click", (e) => { if (e.target === settingsEl) { settingsEl.hidden = true; loadSettings(); } });
+$("open-settings").addEventListener("click", () => { settingsEl.hidden = false; setMsg(""); });
+$("set-close").addEventListener("click", () => { settingsEl.hidden = true; closeProviderForm(); loadSettings(); });
+settingsEl.addEventListener("click", (e) => { if (e.target === settingsEl) { settingsEl.hidden = true; closeProviderForm(); loadSettings(); } });
 
-/* 名称单独保存 */
-$("name-save").addEventListener("click", async () => {
-  const msg = $("set-msg");
-  msg.className = "set-msg";
-  msg.textContent = "保存中…";
-  try {
-    const r = await fetch("/api/settings", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: $("set-name").value.trim() }),
-    });
-    const d = await r.json();
-    if (d.error) throw new Error(d.error);
-    applyIdentity(d.name, null);
-    msg.className = "set-msg ok";
-    msg.textContent = "名称已保存";
-  } catch (e) {
-    msg.className = "set-msg err";
-    msg.textContent = e.message;
-  }
-});
-
-$("set-name").addEventListener("keydown", (e) => { if (e.key === "Enter") $("name-save").click(); });
-
-/* 保存 API 信息 */
-$("set-save").addEventListener("click", async () => {
-  const msg = $("set-msg");
-  msg.className = "set-msg";
-  msg.textContent = "保存中…";
-  try {
-    const r = await fetch("/api/settings", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        api_base: $("set-base").value.trim(),
-        api_key: $("set-key").value.trim(),
-      }),
-    });
-    const d = await r.json();
-    if (d.error) throw new Error(d.error);
-    msg.className = "set-msg ok";
-    msg.textContent = "API 信息已保存";
-    $("need-api").hidden = true;
-    loadModels();
-  } catch (e) {
-    msg.className = "set-msg err";
-    msg.textContent = e.message;
-  }
-});
-
-/* 测试连接（用输入框里的值，不必先保存） */
-$("set-test").addEventListener("click", async () => {
-  const msg = $("set-msg");
-  msg.className = "set-msg";
-  msg.textContent = "连接中…";
-  try {
-    const r = await fetch("/api/test", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        api_base: $("set-base").value.trim(),
-        api_key: $("set-key").value.trim(),
-      }),
-    });
-    const d = await r.json();
-    if (d.ok) { msg.className = "set-msg ok"; msg.textContent = `连接成功，${d.models} 个模型`; }
-    else { msg.className = "set-msg err"; msg.textContent = "失败：" + d.error; }
-  } catch (e) { msg.className = "set-msg err"; msg.textContent = e.message; }
-});
-
-/* ---------- 可搜索模型下拉 ---------- */
+/* ---------- 可搜索模型下拉（含最近使用） ---------- */
 const modelInput = $("model");
 const modelListBox = $("model-list");
 
@@ -161,8 +333,19 @@ function renderModelList(filter = "") {
   }
   const kw = filter.trim().toLowerCase();
   const hits = kw ? modelList.filter((m) => m.toLowerCase().includes(kw)) : modelList;
-  modelListBox.innerHTML = hits.length
-    ? hits.map((m) => `<button class="opt${m === modelInput.value ? " hot" : ""}" type="button">${m}</button>`).join("")
+  const recents = lsGet(recentKey()).filter((m) => !kw || m.toLowerCase().includes(kw));
+  const parts = [];
+  if (recents.length) {
+    parts.push('<div class="combo-group">最近使用</div>');
+    for (const m of recents) parts.push(`<button class="opt${m === modelInput.value ? " hot" : ""}" type="button">↻ ${escapeHtml(m)}</button>`);
+  }
+  const rest = hits.filter((m) => !recents.includes(m));
+  if (rest.length) {
+    if (recents.length) parts.push('<div class="combo-group">全部模型</div>');
+    for (const m of rest) parts.push(`<button class="opt${m === modelInput.value ? " hot" : ""}" type="button">${escapeHtml(m)}</button>`);
+  }
+  modelListBox.innerHTML = parts.length
+    ? parts.join("")
     : `<div class="none">${modelList.length ? "没有匹配的模型，可直接使用输入的名称" : "未加载到模型，可直接输入名称"}</div>`;
   modelListBox.hidden = false;
 }
@@ -178,7 +361,7 @@ $("model-combo").querySelector(".combo-toggle").addEventListener("click", () => 
 modelListBox.addEventListener("click", (e) => {
   const opt = e.target.closest(".opt");
   if (!opt) return;
-  modelInput.value = opt.textContent;
+  modelInput.value = opt.textContent.replace(/^↻\s*/, "");
   modelListBox.hidden = true;
 });
 
@@ -193,18 +376,22 @@ async function loadModels() {
   modelList = [];
   try {
     const d = await (await fetch("/api/models")).json();
-    if (d.error) throw new Error(d.error);
     modelList = d.models || [];
     modelsLoading = false;
-    modelInput.placeholder = modelList.length ? "输入筛选或直接填写模型名" : "未发现生图模型，可手动填写";
-    if (modelList.length) modelInput.value = modelList.includes("fal-gpt-image-2") ? "fal-gpt-image-2" : modelList[0];
-  } catch (e) {
+    if (d.error && !modelList.length) {
+      modelInput.placeholder = "未配置 API，可手动填写模型名";
+    } else {
+      modelInput.placeholder = modelList.length ? "输入筛选或直接填写模型名" : "未发现生图模型，可手动填写";
+      if (modelList.length) modelInput.value = modelList.includes("fal-gpt-image-2") ? "fal-gpt-image-2" : modelList[0];
+    }
+  } catch {
     modelsLoading = false;
     modelInput.placeholder = "未配置 API，可手动填写模型名";
   }
-  if (!modelListBox.hidden) renderModelList(modelInput.value);
+  if (!modelListBox.hidden) renderModelList(); // 渲染完整列表，不按默认选中名过滤
 }
 
+/* ---------- 历史墙：分页 + 筛选 ---------- */
 function renderPager() {
   const pager = $("pager");
   if (!total) { pager.hidden = true; return; }
@@ -229,11 +416,31 @@ function renderPager() {
   $("pg-input").max = pages;
 }
 
+function fillSelect(sel, values, allLabel) {
+  const cur = sel.value;
+  sel.innerHTML = `<option value="">${allLabel}</option>` +
+    values.map((v) => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join("");
+  if ([...sel.options].some((o) => o.value === cur)) sel.value = cur;
+}
+
+function filterQuery() {
+  const p = new URLSearchParams();
+  if ($("f-q").value.trim()) p.set("q", $("f-q").value.trim());
+  if ($("f-model").value) p.set("model", $("f-model").value);
+  if ($("f-provider").value) p.set("provider", $("f-provider").value);
+  if ($("f-range").value !== "all") p.set("range", $("f-range").value);
+  if ($("f-sort") && $("f-sort").value !== "newest") p.set("sort", $("f-sort").value);
+  return p.toString();
+}
+
 async function loadHistory(p = page) {
   try {
-    const d = await (await fetch(`/api/history?page=${p}&page_size=12`)).json();
+    const qs = filterQuery();
+    const d = await (await fetch(`/api/history?page=${p}&page_size=12&${qs}`)).json();
     page = d.page; pages = d.pages; total = d.total;
-    wallItems = d.items.map((it) => ({ url: it.url, name: it.name }));
+    wallItems = d.items.map((it) => ({ ...it }));
+    fillSelect($("f-model"), d.facets.models, "全部模型");
+    fillSelect($("f-provider"), d.facets.providers, "全部来源");
     const g = $("gallery");
     g.innerHTML = "";
     for (const item of d.items) g.appendChild(makeCard(item, false));
@@ -261,18 +468,30 @@ $("pg-go").addEventListener("click", () => {
 
 $("pg-input").addEventListener("keydown", (e) => { if (e.key === "Enter") $("pg-go").click(); });
 
+/* 筛选控件 */
+let searchDebounce = null;
+$("f-q").addEventListener("input", () => {
+  clearTimeout(searchDebounce);
+  searchDebounce = setTimeout(() => loadHistory(1), 250);
+});
+for (const id of ["f-model", "f-provider", "f-range", "f-sort"]) {
+  $(id).addEventListener("change", () => loadHistory(1));
+}
+
 /* ---------- 卡片 ---------- */
 function makeCard(item, fresh) {
   const card = document.createElement("div");
   card.className = "print";
   const secs = item.elapsed != null ? `<span class="secs">${item.elapsed}s</span>` : "";
   const model = item.model || "早期图片";
+  const date = item.created_time ? item.created_time.slice(5, 10) : "";
   card.title = item.prompt || "";
   card.innerHTML = `
     <img src="${item.url}" alt="生成的图片" loading="lazy">
     <div class="meta">
-      <span class="model">${model}</span>
+      <span class="model">${escapeHtml(model)}</span>
       ${secs}
+      ${date ? `<span class="date">${date}</span>` : ""}
       <a href="${item.url}" download>保存</a>
     </div>`;
   card.querySelector("img").addEventListener("click", () => openLightbox(item.url, item.name));
@@ -292,17 +511,17 @@ document.querySelectorAll(".size:not(.theme-btn)").forEach((btn) => {
 });
 
 /* ---------- 生成 ---------- */
-function setMsg(text) { $("msg").textContent = text || ""; }
+function setGenMsg(text) { $("msg").textContent = text || ""; }
 
 async function gen() {
   if (busy) return;
   const prompt = $("prompt").value.trim();
-  if (!prompt) { setMsg("请先写一句提示词"); return; }
-  if (!modelInput.value.trim()) { setMsg("请先选择或填写模型"); return; }
+  if (!prompt) { setGenMsg("请先写一句提示词"); return; }
+  if (!modelInput.value.trim()) { setGenMsg("请先选择或填写模型"); return; }
 
   busy = true;
   $("go").disabled = true;
-  setMsg("");
+  setGenMsg("");
   $("empty")?.remove();
 
   const card = document.createElement("div");
@@ -329,13 +548,18 @@ async function gen() {
     const d = await r.json();
     if (d.error) throw new Error(d.error);
     const img = d.images[0];
-    const fresh = makeCard({ url: img.url, name: img.name, model: d.model, elapsed: d.elapsed, prompt: d.prompt }, true);
+    const fresh = makeCard({
+      url: img.url, name: img.name, model: d.model, elapsed: d.elapsed,
+      prompt: d.prompt, size: img.size, created_time: img.created_time,
+    }, true);
     fresh.querySelector("img").classList.add("develop");
     card.replaceWith(fresh);
-    wallItems.unshift({ url: img.url, name: img.name });
+    wallItems.unshift({ ...img, url: img.url, name: img.name });
+    pushPromptHistory(prompt);
+    pushRecentModel(d.model);
   } catch (e) {
     card.remove();
-    setMsg("出错：" + e.message);
+    setGenMsg("出错：" + e.message);
   } finally {
     clearInterval(timer);
     busy = false;
@@ -352,34 +576,32 @@ let lbName = null;
 const MIN_SCALE = 0.2, MAX_SCALE = 10;
 
 function applyTransform(instant = false) {
-  lbImg.classList.toggle("dragging", instant);
+  lbImg.style.transition = instant ? "none" : "";
   lbImg.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
-  $("zoom-level").textContent = Math.round(scale * 100) + "%";
+  $("zoom-level").textContent = `${Math.round(scale * 100)}%`;
 }
 
 function resetZoom() { scale = 1; tx = 0; ty = 0; applyTransform(); }
 
-function zoomAt(clientX, clientY, factor) {
-  const rect = lbImg.getBoundingClientRect();
-  const px = clientX - (rect.left + rect.width / 2);
-  const py = clientY - (rect.top + rect.height / 2);
-  const next = Math.min(MAX_SCALE, Math.max(MIN_SCALE, scale * factor));
-  const ratio = next / scale;
-  tx = px - ratio * (px - tx);
-  ty = py - ratio * (py - ty);
-  scale = next;
-  clampPan();
-  applyTransform();
+function clampPan() {
+  const r = lbImg.getBoundingClientRect();
+  if (r.width <= stage.clientWidth) tx = 0;
+  else tx = Math.max(stage.clientWidth - r.width, Math.min(0, tx));
+  if (r.height <= stage.clientHeight) ty = 0;
+  else ty = Math.max(stage.clientHeight - r.height, Math.min(0, ty));
 }
 
-function clampPan() {
-  if (scale <= 1) { tx = 0; ty = 0; return; }
-  const dispW = lbImg.getBoundingClientRect().width;
-  const dispH = lbImg.getBoundingClientRect().height;
-  const limX = Math.max(0, (dispW * scale - stage.clientWidth) / 2);
-  const limY = Math.max(0, (dispH * scale - stage.clientHeight) / 2);
-  tx = Math.min(limX, Math.max(-limX, tx));
-  ty = Math.min(limY, Math.max(-limY, ty));
+function zoomAt(clientX, clientY, factor) {
+  const rect = stage.getBoundingClientRect();
+  const cx = clientX - rect.left - rect.width / 2 - tx;
+  const cy = clientY - rect.top - rect.height / 2 - ty;
+  const next = Math.min(MAX_SCALE, Math.max(MIN_SCALE, scale * factor));
+  factor = next / scale;
+  scale = next;
+  tx -= cx * factor - cx;
+  ty -= cy * factor - cy;
+  clampPan();
+  applyTransform(true);
 }
 
 stage.addEventListener("wheel", (e) => {
@@ -423,8 +645,17 @@ stage.addEventListener("pointerup", () => {
 
 lbImg.addEventListener("dblclick", () => (scale > 1.01 ? resetZoom() : zoomAtCenter(2.5)));
 
-/* ---------- 灯箱开关 + 左右切换 ---------- */
+/* ---------- 灯箱开关 + 信息面板 + 左右切换 ---------- */
 let lbIndex = -1;
+
+function fillLbInfo(item) {
+  $("lb-model").textContent = item.model || "—";
+  $("lb-provider").textContent = item.provider || "—";
+  $("lb-time").textContent = item.created_time || "—";
+  $("lb-elapsed").textContent = item.elapsed != null ? `${item.elapsed} 秒` : "—";
+  $("lb-size").textContent = item.size || "—";
+  $("lb-prompt").textContent = item.prompt || "（早期图片没有记录提示词）";
+}
 
 function showLbAt(i) {
   if (!wallItems.length) return;
@@ -434,13 +665,21 @@ function showLbAt(i) {
   lbImg.src = item.url;
   $("lb-dl").href = item.url;
   $("lb-name").textContent = item.name || item.url.split("/").pop();
+  fillLbInfo(item);
   resetZoom();
 }
 
 function openLightbox(url, name) {
   const i = wallItems.findIndex((it) => it.url === url || it.name === name);
-  showLbAt(i >= 0 ? i : 0);
-  if (i < 0) { lbName = name; lbImg.src = url; $("lb-dl").href = url; $("lb-name").textContent = name || url.split("/").pop(); }
+  if (i >= 0) showLbAt(i);
+  else {
+    lbName = name;
+    lbImg.src = url;
+    $("lb-dl").href = url;
+    $("lb-name").textContent = name || url.split("/").pop();
+    lbIndex = -1;
+    fillLbInfo({}); // 找不到条目时清空面板，避免残留上一张的信息
+  }
   lightboxEl.hidden = false;
   if (gsapOK) gsap.from(".lightbox .frame", { y: 18, autoAlpha: 0, duration: 0.3, ease: "power2.out", clearProps: "all" });
 }
@@ -451,15 +690,45 @@ $("lb-prev").addEventListener("click", () => showLbAt(lbIndex - 1));
 $("lb-next").addEventListener("click", () => showLbAt(lbIndex + 1));
 $("lb-close").addEventListener("click", closeLightbox);
 lightboxEl.addEventListener("click", (e) => { if (e.target === lightboxEl) closeLightbox(); });
+
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     if (!lightboxEl.hidden) closeLightbox();
-    else if (!settingsEl.hidden) { settingsEl.hidden = true; loadSettings(); }
+    else if (!settingsEl.hidden) { settingsEl.hidden = true; closeProviderForm(); loadSettings(); }
     return;
   }
   if (lightboxEl.hidden) return;
   if (e.key === "ArrowLeft") showLbAt(lbIndex - 1);
   if (e.key === "ArrowRight") showLbAt(lbIndex + 1);
+});
+
+$("lb-copy").addEventListener("click", async () => {
+  const item = wallItems[lbIndex];
+  const text = item?.prompt || "";
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    ta.remove();
+  }
+  const btn = $("lb-copy");
+  const old = btn.textContent;
+  btn.textContent = "已复制 ✓";
+  setTimeout(() => { btn.textContent = old; }, 1200);
+});
+
+$("lb-reuse").addEventListener("click", () => {
+  const item = wallItems[lbIndex];
+  if (!item?.prompt) return;
+  $("prompt").value = item.prompt;
+  closeLightbox();
+  $("prompt").focus();
+  setGenMsg("已回填该照片的提示词");
 });
 
 $("lb-del").addEventListener("click", async () => {
@@ -477,7 +746,7 @@ $("lb-del").addEventListener("click", async () => {
     if (wallItems.length) showLbAt(lbIndex); // 停在相邻一张
     else closeLightbox();
     loadHistory(page);
-  } catch (e) { setMsg("删除失败：" + e.message); }
+  } catch (e) { setGenMsg("删除失败：" + e.message); }
 });
 
 /* ---------- 快捷键 ---------- */
@@ -490,4 +759,5 @@ $("go").addEventListener("click", gen);
 enterRail();
 loadSettings();
 loadModels();
+renderPromptHistory();
 loadHistory(1);
