@@ -8,7 +8,7 @@ let modelList = [];
 let providers = [];          // [{id,name,api_base,api_key,models}]
 let activePid = "";
 let capabilityDefs = {};
-let referenceFile = null;
+let referenceFiles = [];     // 多参考图：[{File}]，最多 4 张
 let editingPid = "";         // 正在编辑的中转站，空 = 新增
 let wallItems = [];          // 当前墙上的图片（新→旧），供灯箱左右切换
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -541,6 +541,7 @@ function filterQuery() {
   if ($("f-provider").value) p.set("provider", $("f-provider").value);
   if ($("f-range").value !== "all") p.set("range", $("f-range").value);
   if ($("f-sort") && $("f-sort").value !== "newest") p.set("sort", $("f-sort").value);
+  if (onlyFav) p.set("favorite", "1");
   return p.toString();
 }
 
@@ -591,10 +592,68 @@ for (const id of ["f-model", "f-provider", "f-range", "f-sort"]) {
   $(id).addEventListener("change", () => loadHistory(1));
 }
 
+/* 只看收藏 */
+let onlyFav = false;
+$("f-fav").addEventListener("click", () => {
+  onlyFav = !onlyFav;
+  $("f-fav").classList.toggle("on", onlyFav);
+  $("f-fav").setAttribute("aria-pressed", String(onlyFav));
+  $("f-fav").textContent = onlyFav ? "★ 收藏中" : "☆ 收藏";
+  loadHistory(1);
+});
+
+/* 批量管理 */
+let batchMode = false;
+const selected = new Set();
+
+function updateBatchCount() { $("batch-count").textContent = `已选 ${selected.size} 张`; }
+
+function setBatchMode(on) {
+  batchMode = on;
+  selected.clear();
+  $("f-batch").classList.toggle("on", on);
+  $("f-batch").setAttribute("aria-pressed", String(on));
+  $("batch-bar").hidden = !on;
+  document.querySelectorAll("#gallery .print").forEach((c) => c.classList.remove("selected"));
+  updateBatchCount();
+}
+
+function toggleSelect(card, item) {
+  if (selected.has(item.name)) { selected.delete(item.name); card.classList.remove("selected"); }
+  else { selected.add(item.name); card.classList.add("selected"); }
+  updateBatchCount();
+}
+
+$("f-batch").addEventListener("click", () => setBatchMode(!batchMode));
+$("batch-exit").addEventListener("click", () => setBatchMode(false));
+$("batch-all").addEventListener("click", () => {
+  wallItems.forEach((it) => { if (it.name) selected.add(it.name); });
+  document.querySelectorAll("#gallery .print").forEach((c) => c.classList.add("selected"));
+  updateBatchCount();
+});
+$("batch-del").addEventListener("click", async () => {
+  const names = [...selected];
+  if (!names.length) { setGenMsg("先点击图片勾选要删除的照片"); return; }
+  if (!confirm(`删除所选 ${names.length} 张照片？文件会从 outputs 里移除。`)) return;
+  try {
+    const r = await fetch("/api/delete", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ names }),
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    selected.clear();
+    updateBatchCount();
+    setGenMsg(`已删除 ${d.deleted} 张`);
+    loadHistory(page);
+  } catch (e) { setGenMsg("删除失败：" + e.message); }
+});
+
 /* ---------- 卡片 ---------- */
 function makeCard(item, fresh) {
   const card = document.createElement("div");
-  card.className = "print";
+  card.className = "print" + (selected.has(item.name) ? " selected" : "");
+  card.dataset.name = item.name || "";
   const secs = item.elapsed != null ? `<span class="secs">${item.elapsed}s</span>` : "";
   const model = item.model || "早期图片";
   const date = item.created_time ? item.created_time.slice(5, 10) : "";
@@ -602,14 +661,44 @@ function makeCard(item, fresh) {
   card.innerHTML = `
     <img src="${item.url}" alt="生成的图片" loading="lazy">
     <div class="meta">
+      <button class="fav ${item.favorite ? "on" : ""}" type="button" title="收藏 / 取消收藏">★</button>
       <span class="model">${escapeHtml(model)}</span>
       ${secs}
       ${date ? `<span class="date">${date}</span>` : ""}
       <a href="${item.url}" download>保存</a>
     </div>`;
-  card.querySelector("img").addEventListener("click", () => openLightbox(item.url, item.name));
+  card.querySelector("img").addEventListener("click", () => {
+    if (batchMode) toggleSelect(card, item);
+    else openLightbox(item.url, item.name);
+  });
+  card.querySelector(".fav").addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleFavorite(item);
+  });
   if (fresh) enterCard(card);
   return card;
+}
+
+async function toggleFavorite(item) {
+  if (!item?.name) return;
+  try {
+    const r = await fetch("/api/favorite", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: item.name }),
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    item.favorite = d.favorite;
+    const wall = wallItems.find((w) => w.name === item.name);
+    if (wall && wall !== item) wall.favorite = d.favorite;
+    const btn = document.querySelector(`#gallery .print[data-name="${cssEscape(item.name)}"] .fav`);
+    if (btn) btn.classList.toggle("on", d.favorite);
+    if (!lightboxEl.hidden && lbName === item.name) renderLbFav(d.favorite);
+  } catch (e) { setGenMsg("收藏失败：" + e.message); }
+}
+
+function cssEscape(s) {
+  return window.CSS?.escape ? CSS.escape(s) : String(s).replace(/["\\]/g, "\\$&");
 }
 
 /* ---------- 画幅 ---------- */
@@ -662,46 +751,149 @@ if (sizeCustom) sizeCustom.addEventListener("input", () => {
 /* ---------- 生成 ---------- */
 function setGenMsg(text) { $("msg").textContent = text || ""; }
 
-function setReference(file) {
+function addReference(file) {
   if (!file) return;
   const cap = capabilityFor(modelInput.value);
   if (!cap.image_to_image && cap.key !== "generic") { setGenMsg("当前模型暂未声明参考图能力"); return; }
   if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) { setGenMsg("参考图仅支持 PNG、JPEG 或 WEBP"); return; }
   if (!file.size) { setGenMsg("参考图为空"); return; }
   if (file.size > 10 * 1024 * 1024) { setGenMsg("参考图过大，请控制在 10MB 以内"); return; }
-  referenceFile = file;
-  $("reference-thumb").src = URL.createObjectURL(file);
-  $("reference-name").textContent = file.name || "粘贴的图片";
-  $("reference-preview").hidden = false;
-  $("reference-add").hidden = true;
-  $("reference-note").textContent = "图生图模式";
+  if (referenceFiles.length >= 4) { setGenMsg("参考图最多 4 张"); return; }
+  referenceFiles.push(file);
+  renderReferenceThumbs();
+  setGenMsg("");
+}
+
+function renderReferenceThumbs() {
+  const box = $("reference-thumbs");
+  box.innerHTML = "";
+  referenceFiles.forEach((file, i) => {
+    const item = document.createElement("span");
+    item.className = "reference-preview";
+    const img = document.createElement("img");
+    img.src = URL.createObjectURL(file);
+    img.alt = "参考图缩略图";
+    const name = document.createElement("span");
+    name.textContent = file.name || "粘贴的图片";
+    name.title = file.name || "粘贴的图片";
+    const del = document.createElement("button");
+    del.type = "button";
+    del.textContent = "✕";
+    del.setAttribute("aria-label", `移除参考图 ${i + 1}`);
+    del.addEventListener("click", () => { referenceFiles.splice(i, 1); renderReferenceThumbs(); });
+    item.append(img, name, del);
+    box.appendChild(item);
+  });
+  $("reference-note").textContent = referenceFiles.length
+    ? `图生图模式 · ${referenceFiles.length} 张参考图`
+    : "拖入或粘贴图片，最多 4 张";
 }
 
 function clearReference() {
-  referenceFile = null;
+  referenceFiles = [];
   $("reference-input").value = "";
-  $("reference-preview").hidden = true;
-  $("reference-add").hidden = false;
+  renderReferenceThumbs();
   updateCapabilityUI();
 }
 
 $("reference-add").addEventListener("click", () => {
   if (!$("reference-add").classList.contains("disabled")) $("reference-input").click();
 });
-$("reference-input").addEventListener("change", (e) => setReference(e.target.files[0]));
-$("reference-clear").addEventListener("click", clearReference);
+$("reference-input").addEventListener("change", (e) => {
+  [...e.target.files].forEach(addReference);
+  e.target.value = ""; // 清空，允许再次选择同一文件
+});
 $("reference-box").addEventListener("dragover", (e) => { e.preventDefault(); $("reference-box").classList.add("dragover"); });
 $("reference-box").addEventListener("dragleave", () => $("reference-box").classList.remove("dragover"));
-$("reference-box").addEventListener("drop", (e) => { e.preventDefault(); $("reference-box").classList.remove("dragover"); setReference(e.dataTransfer.files[0]); });
-$("prompt").addEventListener("paste", (e) => {
-  const file = [...(e.clipboardData?.items || [])].find((item) => item.type.startsWith("image/"))?.getAsFile();
-  if (file) { e.preventDefault(); setReference(file); }
+$("reference-box").addEventListener("drop", (e) => {
+  e.preventDefault(); $("reference-box").classList.remove("dragover");
+  [...e.dataTransfer.files].forEach(addReference);
 });
+$("prompt").addEventListener("paste", (e) => {
+  const files = [...(e.clipboardData?.items || [])]
+    .filter((item) => item.type.startsWith("image/"))
+    .map((item) => item.getAsFile()).filter(Boolean);
+  if (files.length) { e.preventDefault(); files.forEach(addReference); }
+});
+
+/* ---------- 连拍任务 ---------- */
+let currentTaskId = null;
+let taskPollTimer = null;
+const GO_HTML = '开始生成<kbd>Ctrl ↵</kbd>';
+
+function makeDevelopingCard(label) {
+  const card = document.createElement("div");
+  card.className = "print";
+  const [w, h] = size.split("x");
+  card.innerHTML = `
+    <div class="developing" style="aspect-ratio:${w}/${h}">
+      <div class="red-lamp"></div>
+      <div class="dev-label">${label}</div>
+      <div class="dev-time">0s</div>
+    </div>`;
+  return card;
+}
+
+async function cancelCurrentTask() {
+  if (!currentTaskId) return;
+  setGenMsg("正在取消，当前这条完成后停止…");
+  try {
+    await fetch("/api/task/cancel", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: currentTaskId }),
+    });
+  } catch { /* 下次轮询会拿到最终状态 */ }
+}
+
+async function genBatch(options, card, prompts, timer, fields) {
+  const r = await fetch("/api/generate-task", options);
+  const d = await r.json();
+  if (d.error) throw new Error(d.error);
+  currentTaskId = d.task_id;
+  $("go").innerHTML = "取消连拍";
+  $("go").disabled = false;
+  const labelEl = card.querySelector(".dev-label");
+  let rendered = 0;
+  taskPollTimer = setInterval(async () => {
+    if (!currentTaskId) return;
+    let t;
+    try {
+      t = await (await fetch(`/api/task?id=${currentTaskId}`)).json();
+    } catch { return; } // 临时网络抖动不中断任务
+    if (t.error) return;
+    labelEl.textContent = `连拍 ${Math.min(t.index + 1, t.total)}/${t.total}`;
+    const freshImgs = (t.images || []).slice(rendered);
+    for (let i = freshImgs.length - 1; i >= 0; i--) {
+      const c = makeCard(freshImgs[i], true);
+      c.querySelector("img").classList.add("develop");
+      $("gallery").prepend(c);
+    }
+    if (freshImgs.length) {
+      wallItems.unshift(...freshImgs);
+      rendered = t.images.length;
+    }
+    if (!["done", "failed", "cancelled"].includes(t.status)) return;
+    card.remove();
+    clearInterval(timer);
+    clearInterval(taskPollTimer);
+    currentTaskId = null;
+    busy = false;
+    $("go").disabled = false;
+    $("go").innerHTML = GO_HTML;
+    const okCount = t.image_count, errCount = (t.errors || []).length;
+    if (t.status === "cancelled") setGenMsg(`连拍已取消：完成 ${okCount} 张`);
+    else if (t.status === "failed") setGenMsg(`连拍失败：${t.errors[0]?.error || "未知错误"}`);
+    else setGenMsg(errCount ? `连拍完成：${okCount} 张，${errCount} 条失败` : `连拍完成：${okCount} 张`);
+    prompts.forEach(pushPromptHistory);
+    pushRecentModel(t.model || fields.model);
+    if (referenceFiles.length) clearReference();
+  }, 800);
+}
 
 async function gen() {
   if (busy) return;
-  const prompt = $("prompt").value.trim();
-  if (!prompt) { setGenMsg("请先写一句提示词"); return; }
+  const prompts = $("prompt").value.split("\n").map((s) => s.trim()).filter(Boolean);
+  if (!prompts.length) { setGenMsg("请先写一句提示词"); return; }
   if (!modelInput.value.trim()) { setGenMsg("请先选择或填写模型"); return; }
   const customRaw = sizeCustom?.value.trim() || "";
   if (customRaw && !SIZE_RE.test(customRaw.toLowerCase())) {
@@ -709,64 +901,64 @@ async function gen() {
     sizeCustom.classList.add("invalid");
     return; // 不静默回退，避免用户以为发的是自定义尺寸
   }
+  if (prompts.length > 20) { setGenMsg("一次最多连拍 20 条，请分批提交"); return; }
 
   busy = true;
   $("go").disabled = true;
   setGenMsg("");
   $("empty")?.remove();
 
-  const card = document.createElement("div");
-  card.className = "print";
-  const [w, h] = size.split("x");
-  card.innerHTML = `
-    <div class="developing" style="aspect-ratio:${w}/${h}">
-      <div class="red-lamp"></div>
-      <div class="dev-label">显影中</div>
-      <div class="dev-time">0s</div>
-    </div>`;
+  const card = makeDevelopingCard(prompts.length > 1 ? `连拍 1/${prompts.length}` : "显影中");
   $("gallery").prepend(card);
   enterCard(card);
   const timeEl = card.querySelector(".dev-time");
   const t0 = Date.now();
   const timer = setInterval(() => { timeEl.textContent = `${Math.round((Date.now() - t0) / 1000)}s`; }, 500);
 
+  const fields = { prompt: prompts.join("\n"), model: modelInput.value.trim(), size, quality: $("quality").value, background: $("background").value, style: $("style").value, n: $("n").value };
+  const options = { method: "POST" };
+  if (referenceFiles.length) {
+    const form = new FormData();
+    Object.entries(fields).forEach(([key, value]) => form.append(key, value));
+    referenceFiles.forEach((f) => form.append("image", f, f.name || "reference.png"));
+    options.body = form;
+  } else {
+    options.headers = { "Content-Type": "application/json" };
+    options.body = JSON.stringify(fields);
+  }
+
   try {
-    const fields = { prompt, model: modelInput.value.trim(), size, quality: $("quality").value, background: $("background").value, style: $("style").value, n: $("n").value };
-    const options = { method: "POST" };
-    if (referenceFile) {
-      const form = new FormData();
-      Object.entries(fields).forEach(([key, value]) => form.append(key, value));
-      form.append("image", referenceFile, referenceFile.name || "reference.png");
-      options.body = form;
-    } else {
-      options.headers = { "Content-Type": "application/json" };
-      options.body = JSON.stringify(fields);
+    if (prompts.length > 1) {
+      await genBatch(options, card, prompts, timer, fields);
+      return; // 轮询接管计时与收尾
     }
     const r = await fetch("/api/generate", options);
     const d = await r.json();
     if (d.error) throw new Error(d.error);
     const images = d.images || [];
     if (!images.length) throw new Error("上游未返回图片");
-    const first = images[0];
     const withResponseMeta = (img) => ({ ...img, model: d.model, elapsed: d.elapsed, prompt: d.prompt,
       provider: d.provider, provider_id: d.provider_id, mode: d.mode, reference_used: !!img.reference_used,
-      failover: !!d.failover, failover_from: d.failover_from || "" });
-    const fresh = makeCard(withResponseMeta(first), true);
+      favorite: false, failover: !!d.failover, failover_from: d.failover_from || "" });
+    const fresh = makeCard(withResponseMeta(images[0]), true);
     fresh.querySelector("img").classList.add("develop");
     card.replaceWith(fresh);
     for (let i = images.length - 1; i >= 1; i--) $("gallery").prepend(makeCard(withResponseMeta(images[i]), true));
     wallItems.unshift(...images.map(withResponseMeta));
-    pushPromptHistory(prompt);
+    pushPromptHistory(prompts[0]);
     pushRecentModel(d.model);
     if (d.notice) setGenMsg(d.notice); // 主线路故障已由备用线路完成的提示
-    if (referenceFile) clearReference();
+    if (referenceFiles.length) clearReference();
   } catch (e) {
     card.remove();
     setGenMsg("出错：" + e.message);
   } finally {
-    clearInterval(timer);
-    busy = false;
-    $("go").disabled = false;
+    if (!currentTaskId) {
+      clearInterval(timer);
+      busy = false;
+      $("go").disabled = false;
+      $("go").innerHTML = GO_HTML;
+    }
   }
 }
 
@@ -851,6 +1043,8 @@ lbImg.addEventListener("dblclick", () => (scale > 1.01 ? resetZoom() : zoomAtCen
 /* ---------- 灯箱开关 + 信息面板 + 左右切换 ---------- */
 let lbIndex = -1;
 
+function renderLbFav(on) { $("lb-fav").textContent = on ? "★ 已收藏" : "☆ 收藏"; }
+
 function fillLbInfo(item) {
   $("lb-model").textContent = item.model || "—";
   $("lb-provider").textContent = item.provider || "—";
@@ -860,6 +1054,7 @@ function fillLbInfo(item) {
   $("lb-mode").textContent = item.mode === "image-to-image" ? "图生图" : "文生图";
   $("lb-route").textContent = item.failover ? `备用线路（来自 ${item.failover_from || "主线路"}）` : "主线路";
   $("lb-prompt").textContent = item.prompt || "（早期图片没有记录提示词）";
+  renderLbFav(!!item.favorite);
 }
 
 function showLbAt(i) {
@@ -927,6 +1122,11 @@ $("lb-copy").addEventListener("click", async () => {
   setTimeout(() => { btn.textContent = old; }, 1200);
 });
 
+$("lb-fav").addEventListener("click", () => {
+  const item = wallItems[lbIndex];
+  if (item?.name) toggleFavorite(item);
+});
+
 $("lb-reuse").addEventListener("click", () => {
   const item = wallItems[lbIndex];
   if (!item?.prompt) return;
@@ -958,7 +1158,10 @@ $("lb-del").addEventListener("click", async () => {
 $("prompt").addEventListener("keydown", (e) => {
   if (e.ctrlKey && e.key === "Enter") { e.preventDefault(); gen(); }
 });
-$("go").addEventListener("click", gen);
+$("go").addEventListener("click", () => {
+  if (currentTaskId) cancelCurrentTask();
+  else gen();
+});
 
 /* ---------- 启动 ---------- */
 enterRail();

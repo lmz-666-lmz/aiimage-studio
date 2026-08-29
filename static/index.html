@@ -17,7 +17,12 @@
   <header class="brand">
     <h1><span id="app-name">拾光</span><span class="lamp" aria-hidden="true"></span></h1>
     <p class="tag">本地生图工作台</p>
-    <button id="open-settings" class="gear" title="设置" aria-label="设置">⚙</button>
+    <button id="open-settings" class="gear" title="设置" aria-label="设置">
+      <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="3.2"/>
+        <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34h.09a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87v.09a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1z"/>
+      </svg>
+    </button>
   </header>
 
   <div class="field" id="need-api" hidden>
@@ -25,17 +30,13 @@
   </div>
 
   <div class="field">
-    <label for="prompt">提示词</label>
+    <label for="prompt">提示词 <span class="label-note">一行一条，多行即连拍</span></label>
     <textarea id="prompt" placeholder="描述你想要的画面…" spellcheck="false"></textarea>
     <div id="reference-box" class="reference-box">
-      <input id="reference-input" type="file" accept="image/png,image/jpeg,image/webp" hidden>
+      <input id="reference-input" type="file" accept="image/png,image/jpeg,image/webp" multiple hidden>
+      <div id="reference-thumbs" class="reference-thumbs"></div>
       <button id="reference-add" class="reference-add" type="button">＋ 参考图</button>
-      <div id="reference-preview" class="reference-preview" hidden>
-        <img id="reference-thumb" alt="参考图缩略图">
-        <span id="reference-name"></span>
-        <button id="reference-clear" type="button" aria-label="清除参考图">✕</button>
-      </div>
-      <span id="reference-note" class="label-note">拖入或粘贴图片</span>
+      <span id="reference-note" class="label-note">拖入或粘贴图片，最多 4 张</span>
     </div>
   </div>
 
@@ -74,7 +75,7 @@
       <button class="size" data-size="1024x1536" role="radio" aria-checked="false">竖</button>
       <button class="size" data-size="1792x1024" role="radio" aria-checked="false">宽幅</button>
       <button class="size" data-size="1024x1792" role="radio" aria-checked="false">长幅</button>
-      <input id="size-custom" type="text" placeholder="自定义…" autocomplete="off"
+      <input id="size-custom" class="size-custom" type="text" placeholder="自定义…" autocomplete="off"
              title="任意宽高，如 768x1344，原样发给中转站" aria-label="自定义画幅">
     </div>
   </div>
@@ -98,6 +99,11 @@
       <option value="fastest">最快生成</option>
       <option value="model">模型名称</option>
     </select>
+    <span class="filter-actions">
+      <button id="f-fav" class="filter-toggle" type="button" aria-pressed="false" title="只显示收藏的照片">☆ 收藏</button>
+      <button id="f-batch" class="filter-toggle" type="button" aria-pressed="false" title="勾选多张，可批量删除">批量管理</button>
+      <a id="f-export" href="/api/history/export" class="filter-toggle" title="导出全部元数据（不含图片本体）" download>导出</a>
+    </span>
   </div>
   <div id="gallery" class="masonry"></div>
   <div id="empty" class="empty">
@@ -118,6 +124,12 @@
       </span>
     </span>
   </nav>
+  <div id="batch-bar" class="batch-bar" hidden>
+    <span id="batch-count" class="batch-count">已选 0 张</span>
+    <button id="batch-all" class="ghost" type="button">全选本页</button>
+    <button id="batch-del" class="ghost batch-del" type="button">删除所选</button>
+    <button id="batch-exit" class="ghost" type="button">退出</button>
+  </div>
 </main>
 
 <!-- 灯箱：滚轮/按钮缩放、拖拽平移、双击缩放 -->
@@ -145,6 +157,7 @@
       <div class="lb-info-actions">
         <button id="lb-copy" class="zoom-btn wide">复制 Prompt</button>
         <button id="lb-reuse" class="zoom-btn wide">重新使用</button>
+        <button id="lb-fav" class="zoom-btn wide">☆ 收藏</button>
         <button id="lb-del" class="danger">删除</button>
       </div>
     </aside>

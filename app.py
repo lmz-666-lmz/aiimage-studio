@@ -8,17 +8,20 @@
 import base64
 import json
 import mimetypes
+import os
+import queue
 import re
 import ssl
+import threading
 import time
 import urllib.error
 import urllib.request
 import uuid
 from pathlib import Path
 
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, Response, jsonify, request, send_from_directory
 
-APP_VERSION = "1.0.2"
+APP_VERSION = "1.0.3"
 APP_AUTHOR = "lmz-666-lmz"
 
 # One source of truth for the parameter contract used by the UI and the
@@ -88,13 +91,20 @@ CAPABILITY_MATCHERS = (
 
 HEALTH_TTL = 45
 HEALTH_STATES = ("unchecked", "healthy", "slow", "rate_limited", "unavailable")
+MODELS_TTL = 600
 MAX_REFERENCE_BYTES = 10 * 1024 * 1024
+MAX_REFERENCE_COUNT = 4
 REFERENCE_MIMES = {"image/png", "image/jpeg", "image/webp"}
 
 BASE_DIR = Path(__file__).resolve().parent
 OUTPUT_DIR = BASE_DIR / "outputs"
 OUTPUT_DIR.mkdir(exist_ok=True)
 CONFIG_PATH = BASE_DIR / "config.json"
+# 瞬时运行状态（健康记录 / 模型缓存）与用户配置分离，避免每次生成都重写 config.json
+STATE_PATH = BASE_DIR / "runtime_state.json"
+
+CONFIG_LOCK = threading.RLock()   # 保护 config 的读改写与落盘
+STATE_LOCK = threading.RLock()    # 保护 runtime state 的读改写与落盘
 
 DEFAULT_CONFIG = {
     "name": "拾光",
@@ -110,10 +120,10 @@ def _new_id() -> str:
     return f"provider_{uuid.uuid4().hex[:8]}"
 
 def capability_for(model: str | None) -> dict:
+    """Match aliases/substrings so relay-renamed model ids still adapt."""
     def _norm(s: str) -> str:
         # 中转站常用 grok-image / grok_image / GPT.Image 等写法，分隔符统一成空格
         return s.strip().lower().replace("-", " ").replace("_", " ")
-    """Match aliases/substrings so relay-renamed model ids still adapt."""
     name = _norm(model or "")
     for key, matcher in CAPABILITY_MATCHERS:
         if _norm(matcher) in name:
@@ -121,18 +131,29 @@ def capability_for(model: str | None) -> dict:
     return {**MODEL_CAPABILITIES["generic"], "key": "generic"}
 
 
+def get_health(pid: str) -> dict:
+    return dict(state["health"].get(pid) or {"status": "unchecked"})
+
+
 def public_provider(provider: dict) -> dict:
     """Never send API keys to the browser or include them in health payloads."""
     return {
         "id": provider.get("id", ""), "name": provider.get("name", ""),
         "api_base": provider.get("api_base", ""), "models": list(provider.get("models") or []),
-        "health": dict(provider.get("health") or {"status": "unchecked"}),
+        "health": get_health(provider.get("id", "")),
         "has_key": bool(provider.get("api_key")),
     }
 
 
+def _atomic_write_json(path: Path, obj: dict):
+    """临时文件 + os.replace 原子落盘，写一半断电也不会留下坏文件。"""
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(tmp, path)
+
+
 def save_config_dict(cfg: dict):
-    CONFIG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    _atomic_write_json(CONFIG_PATH, cfg)
 
 
 def _migrate(cfg: dict) -> bool:
@@ -155,15 +176,16 @@ def _migrate(cfg: dict) -> bool:
         if not p.get("id"):
             p["id"] = _new_id()
             changed = True
-        for field, default in (("name", "未命名中转"), ("api_base", ""), ("api_key", ""), ("models", []),
-                               ("health", {"status": "unchecked"})):
+        for field, default in (("name", "未命名中转"), ("api_base", ""), ("api_key", ""), ("models", [])):
             if field not in p:
                 p[field] = default
                 changed = True
-        if not isinstance(p.get("health"), dict):
-            p["health"] = {"status": "unchecked"}
+        # v1.0.x 把健康状态写进 config；现在只保留在运行时状态文件里
+        if "health" in p:
+            h = p.pop("health")
+            if isinstance(h, dict) and h.get("status") not in (None, "unchecked"):
+                state["health"].setdefault(p["id"], h)
             changed = True
-        p["health"].setdefault("status", "unchecked")
     ids = {p["id"] for p in cfg["providers"]}
     if cfg.get("active_provider") not in ids:
         cfg["active_provider"] = cfg["providers"][0]["id"] if cfg["providers"] else ""
@@ -179,17 +201,39 @@ def _migrate(cfg: dict) -> bool:
 
 
 def save_config():
-    save_config_dict(config)
+    with CONFIG_LOCK:
+        save_config_dict(config)
+
+
+def _load_state() -> dict:
+    st = {"health": {}, "models_cache": {}}
+    if STATE_PATH.exists():
+        try:
+            loaded = json.loads(STATE_PATH.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                if isinstance(loaded.get("health"), dict):
+                    st["health"] = loaded["health"]
+                if isinstance(loaded.get("models_cache"), dict):
+                    st["models_cache"] = loaded["models_cache"]
+        except Exception:
+            pass  # 状态文件损坏不影响使用，直接重建
+    return st
+
+
+def save_state():
+    with STATE_LOCK:
+        _atomic_write_json(STATE_PATH, state)
+
+
+state = _load_state()
 
 
 def _load_config() -> dict:
     cfg = dict(DEFAULT_CONFIG)
     before = None
     if CONFIG_PATH.exists():
-        raw_text = None
         try:
-            raw_text = CONFIG_PATH.read_text(encoding="utf-8")
-            before = json.loads(raw_text)
+            before = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
             cfg.update(before)
         except Exception:
             pass  # 配置文件损坏时回退默认
@@ -210,8 +254,6 @@ def active_provider() -> dict | None:
 
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
-
-import threading
 
 _tls_note = threading.local()  # 每请求线程独立，避免并发时证书提示串扰
 
@@ -318,14 +360,15 @@ def set_health(prov: dict, status: str, latency_ms: int | None = None, error: st
         record["latency_ms"] = latency_ms
     if error:
         record["error"] = error
-    prov["health"] = record
-    save_config()
+    with STATE_LOCK:
+        state["health"][prov["id"]] = record
+    save_state()
 
 
 def check_provider_health(prov: dict, force: bool = False) -> dict:
     if not prov or not prov.get("api_base") or not prov.get("api_key"):
         return {"status": "unavailable", "error": "未配置地址或密钥"}
-    existing = prov.get("health") or {}
+    existing = state["health"].get(prov["id"]) or {}
     if not force and existing.get("checked_at") and time.time() - existing["checked_at"] < HEALTH_TTL:
         return existing
     started = time.perf_counter()
@@ -337,7 +380,7 @@ def check_provider_health(prov: dict, force: bool = False) -> dict:
     except Exception as e:
         status = "rate_limited" if isinstance(e, urllib.error.HTTPError) and e.code == 429 else "unavailable"
         set_health(prov, status, round((time.perf_counter() - started) * 1000), friendly_error(e))
-    return prov.get("health") or {"status": "unavailable"}
+    return state["health"].get(prov["id"]) or {"status": "unavailable"}
 
 
 @app.get("/")
@@ -368,18 +411,19 @@ def get_settings():
 def set_settings():
     """部分更新：只改请求里出现的字段。主题点击即存，名称单独保存。"""
     body = request.get_json(force=True)
-    if "name" in body:
-        name = (body.get("name") or "").strip()
-        if not name:
-            return jsonify({"error": "名称不能为空"}), 400
-        config["name"] = name
-    if "theme" in body:
-        if body["theme"] not in THEMES:
-            return jsonify({"error": "未知主题"}), 400
-        config["theme"] = body["theme"]
-    if "failover_enabled" in body:
-        config["failover_enabled"] = bool(body["failover_enabled"])
-    save_config()
+    with CONFIG_LOCK:
+        if "name" in body:
+            name = (body.get("name") or "").strip()
+            if not name:
+                return jsonify({"error": "名称不能为空"}), 400
+            config["name"] = name
+        if "theme" in body:
+            if body["theme"] not in THEMES:
+                return jsonify({"error": "未知主题"}), 400
+            config["theme"] = body["theme"]
+        if "failover_enabled" in body:
+            config["failover_enabled"] = bool(body["failover_enabled"])
+        save_config()
     return jsonify(settings_payload())
 
 
@@ -402,9 +446,9 @@ def upsert_provider():
     """新增或编辑中转站；新增后自动启用。地址/密钥变更时清空已缓存模型。"""
     body = request.get_json(force=True)
     fields, err = _validate_provider_body(body)
+    pid = (body.get("id") or "").strip()
     if err:
         # Editing an existing provider may leave the key blank to keep it.
-        pid = (body.get("id") or "").strip()
         if not pid or body.get("api_key", "").strip():
             return jsonify({"error": err}), 400
         target = next((p for p in config["providers"] if p["id"] == pid), None)
@@ -415,35 +459,41 @@ def upsert_provider():
         if not name or not api_base.startswith(("http://", "https://")):
             return jsonify({"error": err}), 400
         fields = {"name": name, "api_base": api_base, "api_key": target.get("api_key", "")}
-    pid = (body.get("id") or "").strip()
-    if pid:
-        target = next((p for p in config["providers"] if p["id"] == pid), None)
-        if not target:
-            return jsonify({"error": "中转站不存在"}), 404
-        if target["api_base"] != fields["api_base"] or target["api_key"] != fields["api_key"]:
-            target["models"] = []
-            drop_models_cache(target["api_base"], target["api_key"])
-            target["health"] = {"status": "unchecked"}
-        target.update(fields)
-    else:
-        entry = {"id": _new_id(), **fields, "models": []}
-        config["providers"].append(entry)
-        config["active_provider"] = entry["id"]
-    save_config()
+    with CONFIG_LOCK:
+        if pid:
+            target = next((p for p in config["providers"] if p["id"] == pid), None)
+            if not target:
+                return jsonify({"error": "中转站不存在"}), 404
+            if target["api_base"] != fields["api_base"] or target["api_key"] != fields["api_key"]:
+                target["models"] = []
+                drop_models_cache(pid)
+                with STATE_LOCK:
+                    state["health"].pop(pid, None)
+                save_state()
+            target.update(fields)
+        else:
+            entry = {"id": _new_id(), **fields, "models": []}
+            config["providers"].append(entry)
+            config["active_provider"] = entry["id"]
+        save_config()
     return jsonify(settings_payload())
 
 
 @app.post("/api/providers/delete")
 def delete_provider():
     pid = (request.get_json(force=True).get("id") or "").strip()
-    idx = next((i for i, p in enumerate(config["providers"]) if p["id"] == pid), -1)
-    if idx < 0:
-        return jsonify({"error": "中转站不存在"}), 404
-    removed = config["providers"].pop(idx)
-    drop_models_cache(removed["api_base"], removed["api_key"])
-    if config["active_provider"] == pid:
-        config["active_provider"] = config["providers"][0]["id"] if config["providers"] else ""
-    save_config()
+    with CONFIG_LOCK:
+        idx = next((i for i, p in enumerate(config["providers"]) if p["id"] == pid), -1)
+        if idx < 0:
+            return jsonify({"error": "中转站不存在"}), 404
+        config["providers"].pop(idx)
+        drop_models_cache(pid)
+        with STATE_LOCK:
+            state["health"].pop(pid, None)
+        save_state()
+        if config["active_provider"] == pid:
+            config["active_provider"] = config["providers"][0]["id"] if config["providers"] else ""
+        save_config()
     return jsonify(settings_payload())
 
 
@@ -453,8 +503,9 @@ def activate_provider():
     pid = (request.get_json(force=True).get("id") or "").strip()
     if not any(p["id"] == pid for p in config["providers"]):
         return jsonify({"error": "中转站不存在"}), 404
-    config["active_provider"] = pid
-    save_config()
+    with CONFIG_LOCK:
+        config["active_provider"] = pid
+        save_config()
     models, error = fetch_models_for(active_provider())
     payload = settings_payload()
     payload.update({"models": models})
@@ -464,12 +515,14 @@ def activate_provider():
 
 
 # ---------- 模型 ----------
-_models_cache = {"key": None, "models": [], "ts": 0.0}
+# 按中转站 id 各存一份缓存；旧版单条全局缓存在多站切换时会互相清空
+_models_cache = {}
+_models_cache_lock = threading.Lock()
 
 
-def drop_models_cache(base: str, key: str):
-    if _models_cache["key"] == ((base or "").rstrip("/"), key or ""):
-        _models_cache.update({"key": None, "models": [], "ts": 0.0})
+def drop_models_cache(pid: str):
+    with _models_cache_lock:
+        _models_cache.pop(pid, None)
 
 
 def fetch_models_for(prov: dict | None):
@@ -477,14 +530,17 @@ def fetch_models_for(prov: dict | None):
     if not prov or not prov["api_base"] or not prov["api_key"]:
         return [], "请先填写 API 地址和密钥"
     now = time.time()
-    cache_key = (prov["api_base"], prov["api_key"])
-    if _models_cache["key"] == cache_key and now - _models_cache["ts"] < 600:
-        return _models_cache["models"], None
+    pid = prov.get("id", "")
+    with _models_cache_lock:
+        cached = _models_cache.get(pid)
+    if cached and now - cached["ts"] < MODELS_TTL:
+        return list(cached["models"]), None
     try:
         ids = [m["id"] for m in upstream("/v1/models", base=prov["api_base"], key=prov["api_key"], timeout=20).get("data", [])]
         kw = ("image", "banana", "seedream", "kling", "dall", "flux")
         result = sorted(i for i in ids if any(k in i.lower() for k in kw))
-        _models_cache.update({"key": cache_key, "models": result, "ts": now})
+        with _models_cache_lock:
+            _models_cache[pid] = {"models": result, "ts": now}
         if result != prov.get("models"):
             prov["models"] = result
             save_config()
@@ -554,10 +610,12 @@ def capabilities():
 
 
 # ---------- 生成 ----------
-def upstream_multipart(path: str, fields: dict, file_field: str, filename: str,
-                       blob: bytes, mime: str, timeout: int = 300,
+def upstream_multipart(path: str, fields: dict, files: list, timeout: int = 300,
                        base: str | None = None, key: str | None = None):
-    """Small stdlib-only multipart encoder for OpenAI-compatible image edits."""
+    """Small stdlib-only multipart encoder for OpenAI-compatible image edits.
+
+    files: [(field, filename, blob, mime), ...]，多参考图时每张一个 part。
+    """
     _tls_note.value = None
     prov = active_provider() or {}
     base = (base if base is not None else prov.get("api_base", "")).rstrip("/")
@@ -570,10 +628,12 @@ def upstream_multipart(path: str, fields: dict, file_field: str, filename: str,
         chunks.extend([f"--{boundary}\r\n".encode(),
                        f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode(),
                        str(value).encode(), b"\r\n"])
-    chunks.extend([f"--{boundary}\r\n".encode(),
-                   f'Content-Disposition: form-data; name="{file_field}"; filename="{filename}"\r\n'.encode(),
-                   f"Content-Type: {mime}\r\n\r\n".encode(), blob, b"\r\n",
-                   f"--{boundary}--\r\n".encode()])
+    for field, filename, blob, mime in files:
+        safe_name = os.path.basename(str(filename)).replace('"', "'").replace("\r", "").replace("\n", "")
+        chunks.extend([f"--{boundary}\r\n".encode(),
+                       f'Content-Disposition: form-data; name="{field}"; filename="{safe_name}"\r\n'.encode(),
+                       f"Content-Type: {mime}\r\n\r\n".encode(), blob, b"\r\n"])
+    chunks.append(f"--{boundary}--\r\n".encode())
     req = urllib.request.Request(
         f"{base}{path}", data=b"".join(chunks), method="POST",
         headers={"Authorization": f"Bearer {key}", "Content-Type": f"multipart/form-data; boundary={boundary}",
@@ -617,6 +677,7 @@ def _persist_image_results(data: dict, payload: dict, prov: dict, elapsed: float
                 "mode": extra_meta.get("mode", "text-to-image"),
                 "reference_used": bool(extra_meta.get("reference_used", False)),
                 "reference_name": extra_meta.get("reference_name", ""),
+                "reference_count": int(extra_meta.get("reference_count", 0)),
                 "failover": bool(extra_meta.get("failover", False)),
                 "failover_from": extra_meta.get("failover_from", "")}
         if item.get("b64_json"):
@@ -624,7 +685,7 @@ def _persist_image_results(data: dict, payload: dict, prov: dict, elapsed: float
             # 时间戳只到秒，追加短随机段防止同秒多次生成互相覆盖
             name = f"{time.strftime('%Y%m%d_%H%M%S')}_{i}_{uuid.uuid4().hex[:4]}{_ext_from_blob(blob)}"
             (OUTPUT_DIR / name).write_bytes(blob)
-            (OUTPUT_DIR / f"{name}.json").write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+            _write_meta(name, meta)
             results.append({"url": f"/outputs/{name}", "name": name, **meta})
         elif item.get("url"):
             req = urllib.request.Request(item["url"], headers={"User-Agent": "Mozilla/5.0"})
@@ -632,7 +693,7 @@ def _persist_image_results(data: dict, payload: dict, prov: dict, elapsed: float
                 blob, ct = _fetch(req, 120)
                 name = f"{time.strftime('%Y%m%d_%H%M%S')}_{i}_{uuid.uuid4().hex[:4]}{_ext_from(ct, item['url'])}"
                 (OUTPUT_DIR / name).write_bytes(blob)
-                (OUTPUT_DIR / f"{name}.json").write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+                _write_meta(name, meta)
                 results.append({"url": f"/outputs/{name}", "name": name, **meta})
             except Exception as e:
                 results.append({"url": item["url"], "name": None, "fetch_error": friendly_error(e)})
@@ -661,52 +722,66 @@ def _filtered_payload(body: dict, model: str, cap: dict) -> dict:
     return payload
 
 
-def _reference_file():
-    image = request.files.get("image")
-    if not image or not image.filename:
+def _reference_files():
+    """解析 multipart 里的参考图，返回 [(文件名, 类型, 字节), ...]。"""
+    uploads = [f for f in request.files.getlist("image") if f and f.filename]
+    if not uploads:
         return None, "请选择参考图"
-    mime = (image.mimetype or mimetypes.guess_type(image.filename)[0] or "").lower()
-    if mime not in REFERENCE_MIMES:
-        return None, "参考图仅支持 PNG、JPEG 或 WEBP"
-    blob = image.read(MAX_REFERENCE_BYTES + 1)
-    if not blob:
-        return None, "参考图为空"
-    if len(blob) > MAX_REFERENCE_BYTES:
-        return None, "参考图过大，请控制在 10MB 以内"
-    return (image.filename, mime, blob), None
+    if len(uploads) > MAX_REFERENCE_COUNT:
+        return None, f"参考图最多 {MAX_REFERENCE_COUNT} 张"
+    references = []
+    for image in uploads:
+        mime = (image.mimetype or mimetypes.guess_type(image.filename)[0] or "").lower()
+        if mime not in REFERENCE_MIMES:
+            return None, f"参考图仅支持 PNG、JPEG 或 WEBP（{image.filename}）"
+        blob = image.read(MAX_REFERENCE_BYTES + 1)
+        if not blob:
+            return None, f"参考图为空（{image.filename}）"
+        if len(blob) > MAX_REFERENCE_BYTES:
+            return None, f"参考图过大，请控制在 10MB 以内（{image.filename}）"
+        references.append((image.filename, mime, blob))
+    return references, None
 
 
 def _providers_for_model(model: str, primary: dict):
     return [p for p in config["providers"] if p["id"] != primary["id"] and model in (p.get("models") or [])]
 
 
-@app.post("/api/generate")
-def generate():
-    prov = active_provider()
-    if not prov or not prov.get("api_base") or not prov.get("api_key"):
-        return jsonify({"error": "还没有可用的中转站，请在设置里添加并填写地址和密钥"}), 400
+class GenError(Exception):
+    """生成失败，携带给前端看的中文说明与 HTTP 状态。"""
+
+    def __init__(self, message: str, status: int = 502):
+        super().__init__(message)
+        self.status = status
+
+
+def _parse_generation_body():
+    """从 JSON / multipart 请求解析生成参数。返回 (body, reference list|None, error)。"""
     is_multipart = request.mimetype == "multipart/form-data"
     body = request.form.to_dict() if is_multipart else (request.get_json(silent=True) or {})
-    prompt = (body.get("prompt") or "").strip()
-    model = (body.get("model") or "fal-gpt-image-2").strip()
-    if not prompt:
-        return jsonify({"error": "提示词不能为空"}), 400
-    cap = capability_for(model)
     reference = None
     if is_multipart:
-        reference, error = _reference_file()
+        reference, error = _reference_files()
         if error:
-            return jsonify({"error": error}), 400
-        if not cap.get("image_to_image"):
-            return jsonify({"error": "当前模型暂未声明参考图能力"}), 400
-    payload = _filtered_payload(body, model, cap)
+            return None, None, error
+    return body, reference, None
+
+
+def _run_generation(model: str, payload: dict, reference: list | None) -> dict:
+    """单条 prompt 的完整生成流程：调用上游、安全故障切换、持久化。失败抛 GenError。"""
+    prov = active_provider()
+    if not prov or not prov.get("api_base") or not prov.get("api_key"):
+        raise GenError("还没有可用的中转站，请在设置里添加并填写地址和密钥", 400)
     mode = "image-to-image" if reference else "text-to-image"
     path = "/v1/images/edits" if reference else "/v1/images/generations"
+    # 单张沿用 image 字段；多张按官方 edits 约定用 image[]
+    file_field = "image" if reference and len(reference) == 1 else "image[]"
+    files = [(file_field, fn, blob, mime) for fn, mime, blob in reference] if reference else []
 
     def call(target):
         if reference:
-            return upstream_multipart(path, payload, "image", reference[0], reference[2], reference[1],
-                                       base=target["api_base"], key=target["api_key"])
+            return upstream_multipart(path, payload, files,
+                                      base=target["api_base"], key=target["api_key"])
         return upstream(path, payload, base=target["api_base"], key=target["api_key"])
 
     failover = False
@@ -718,42 +793,204 @@ def generate():
     except Exception as primary_error:
         set_health(prov, error_status(primary_error), round((time.time() - started) * 1000), friendly_error(primary_error))
         if not config.get("failover_enabled") or not is_safe_failover_error(primary_error):
-            return jsonify({"error": friendly_error(primary_error)}), 502
+            raise GenError(friendly_error(primary_error))
         candidates = _providers_for_model(model, prov)
         if not candidates:
-            return jsonify({"error": f"主中转站失败，备用站没有同名模型（{model}）"}), 502
+            raise GenError(f"主中转站失败，备用站没有同名模型（{model}）")
         backup = candidates[0]  # at most one fallback request
         try:
             started = time.time()
             data = call(backup)
             set_health(backup, "healthy", round((time.time() - started) * 1000))
             failover, failover_from = True, prov["name"]
-            config["active_provider"] = backup["id"]
-            save_config()
+            with CONFIG_LOCK:
+                config["active_provider"] = backup["id"]
+                save_config()
             prov = backup
         except Exception as backup_error:
             set_health(backup, error_status(backup_error), round((time.time() - started) * 1000), friendly_error(backup_error))
-            return jsonify({"error": f"主线路与备用线路均不可用：{friendly_error(backup_error)}"}), 502
+            raise GenError(f"主线路与备用线路均不可用：{friendly_error(backup_error)}")
 
     elapsed = round(time.time() - started, 1)
     try:
         images = _persist_image_results(data, payload, prov, elapsed, {
             "mode": mode, "reference_used": bool(reference),
-            "reference_name": reference[0] if reference else "",
+            "reference_name": "、".join(fn for fn, _, _ in reference) if reference else "",
+            "reference_count": len(reference) if reference else 0,
             "failover": failover, "failover_from": failover_from,
         })
     except ValueError as e:
-        return jsonify({"error": str(e)}), 502
-    response = {"images": images, "elapsed": elapsed, "model": model, "prompt": prompt,
+        raise GenError(str(e))
+    response = {"images": images, "elapsed": elapsed, "model": model,
+                "prompt": payload.get("prompt", ""),
                 "provider": prov["name"], "provider_id": prov["id"], "mode": mode,
                 "failover": failover, "failover_from": failover_from}
     if failover:
         response["notice"] = f"主线路「{failover_from}」暂时不可用，已通过「{prov['name']}」完成生成"
+    return response
+
+
+@app.post("/api/generate")
+def generate():
+    body, reference, error = _parse_generation_body()
+    if error:
+        return jsonify({"error": error}), 400
+    prompt = (body.get("prompt") or "").strip()
+    model = (body.get("model") or "fal-gpt-image-2").strip()
+    if not prompt:
+        return jsonify({"error": "提示词不能为空"}), 400
+    cap = capability_for(model)
+    if reference and not cap.get("image_to_image"):
+        return jsonify({"error": "当前模型暂未声明参考图能力"}), 400
+    payload = _filtered_payload(body, model, cap)
+    try:
+        response = _run_generation(model, payload, reference)
+    except GenError as e:
+        return jsonify({"error": str(e)}), e.status
     return jsonify(with_tls_note(response))
+
+
+# ---------- 连拍任务队列 ----------
+# 单 worker 串行：同一密钥并发请求容易触发限流、也容易重复计费
+MAX_BATCH_PROMPTS = 20
+TASK_RETENTION = 1800  # 已结束的任务保留 30 分钟供查询
+_tasks = {}
+_tasks_lock = threading.Lock()
+_task_queue = queue.Queue()
+
+
+def _purge_tasks():
+    now = time.time()
+    with _tasks_lock:
+        stale = [tid for tid, t in _tasks.items()
+                 if t["status"] in ("done", "failed", "cancelled")
+                 and t.get("finished_at") and now - t["finished_at"] > TASK_RETENTION]
+        for tid in stale:
+            _tasks.pop(tid, None)
+
+
+def _run_batch_task(task: dict):
+    for i, prompt in enumerate(task["prompts"]):
+        with _tasks_lock:
+            if task["status"] == "cancelled":
+                break
+            task["status"] = "running"
+            task["index"] = i
+        payload = {**task["base_payload"], "prompt": prompt}
+        try:
+            result = _run_generation(task["model"], payload, task["reference"])
+            with _tasks_lock:
+                task["images"].extend(result["images"])
+                if result.get("notice"):
+                    task["notice"] = result["notice"]
+        except GenError as e:
+            with _tasks_lock:
+                task["errors"].append({"prompt": prompt, "error": str(e)})
+        except Exception as e:  # 单条出错不中断整批，最后汇总
+            with _tasks_lock:
+                task["errors"].append({"prompt": prompt, "error": f"生成失败：{e}"})
+    with _tasks_lock:
+        if task["status"] != "cancelled":
+            task["status"] = "failed" if task["errors"] and not task["images"] else "done"
+        task["finished_at"] = time.time()
+
+
+def _task_worker():
+    while True:
+        tid = _task_queue.get()
+        with _tasks_lock:
+            task = _tasks.get(tid)
+        if not task:
+            continue
+        try:
+            _run_batch_task(task)
+        except Exception as e:
+            with _tasks_lock:
+                task["status"] = "failed"
+                task["finished_at"] = time.time()
+                task["errors"].append({"prompt": "", "error": f"任务异常：{e}"})
+
+
+threading.Thread(target=_task_worker, daemon=True, name="gen-queue").start()
+
+
+@app.post("/api/generate-task")
+def generate_task():
+    """一行一条提示词，整批入队顺序生成。"""
+    body, reference, error = _parse_generation_body()
+    if error:
+        return jsonify({"error": error}), 400
+    model = (body.get("model") or "fal-gpt-image-2").strip()
+    prompts = [ln.strip() for ln in str(body.get("prompt") or "").splitlines() if ln.strip()]
+    if not prompts:
+        return jsonify({"error": "提示词不能为空"}), 400
+    if len(prompts) > MAX_BATCH_PROMPTS:
+        return jsonify({"error": f"一次最多连拍 {MAX_BATCH_PROMPTS} 条"}), 400
+    if not model:
+        return jsonify({"error": "请先选择或填写模型"}), 400
+    cap = capability_for(model)
+    if reference and not cap.get("image_to_image"):
+        return jsonify({"error": "当前模型暂未声明参考图能力"}), 400
+    prov = active_provider()
+    if not prov or not prov.get("api_base") or not prov.get("api_key"):
+        return jsonify({"error": "还没有可用的中转站，请在设置里添加并填写地址和密钥"}), 400
+    base_payload = _filtered_payload(body, model, cap)
+    base_payload.pop("prompt", None)  # 每条提示词执行时单独填入
+    _purge_tasks()
+    tid = uuid.uuid4().hex[:12]
+    task = {"id": tid, "status": "queued", "model": model, "prompts": prompts,
+            "base_payload": base_payload, "reference": reference,
+            "total": len(prompts), "index": 0, "images": [], "errors": [],
+            "notice": "", "created_at": time.time(), "finished_at": None}
+    with _tasks_lock:
+        _tasks[tid] = task
+    _task_queue.put(tid)
+    return jsonify({"task_id": tid, "total": len(prompts)})
+
+
+def _task_snapshot(task: dict) -> dict:
+    # 只在持锁时调用
+    idx = min(task["index"], len(task["prompts"]) - 1) if task["prompts"] else 0
+    return {"id": task["id"], "status": task["status"], "model": task["model"],
+            "index": task["index"], "total": task["total"],
+            "prompt": task["prompts"][idx] if task["prompts"] else "",
+            "image_count": len(task["images"]), "images": list(task["images"]),
+            "errors": list(task["errors"]), "notice": task["notice"]}
+
+
+@app.get("/api/task")
+def task_status():
+    tid = (request.args.get("id") or "").strip()
+    with _tasks_lock:
+        task = _tasks.get(tid)
+        if not task:
+            return jsonify({"error": "任务不存在"}), 404
+        return jsonify(_task_snapshot(task))
+
+
+@app.post("/api/task/cancel")
+def task_cancel():
+    """取消在下一条 Prompt 前生效；不打断正在上游执行的请求，避免重复计费。"""
+    tid = (request.get_json(force=True).get("id") or "").strip()
+    with _tasks_lock:
+        task = _tasks.get(tid)
+        if not task:
+            return jsonify({"error": "任务不存在"}), 404
+        if task["status"] in ("queued", "running"):
+            task["status"] = "cancelled"
+        return jsonify({"ok": True, "status": task["status"]})
 
 
 # ---------- 历史与筛选 ----------
 _RANGE_SPANS = {"today": 86400, "week": 7 * 86400}
+IMAGE_EXTS = {".webp", ".png", ".jpg", ".jpeg", ".gif"}
+
+# 内存索引：目录里图片 / sidecar 没变就直接复用，避免每次请求全量读 JSON
+_hist_lock = threading.Lock()
+_hist_sig = None
+_hist_meta = {}      # name -> sidecar 元数据
+_hist_mtime = {}     # name -> 图片文件 mtime
+_hist_sc_mtime = {}  # name -> sidecar mtime（收藏等只改 sidecar 的操作靠它发现变化）
 
 
 def _read_meta(p: Path) -> dict:
@@ -766,6 +1003,46 @@ def _read_meta(p: Path) -> dict:
     return {}
 
 
+def _write_meta(name: str, meta: dict):
+    _atomic_write_json(OUTPUT_DIR / (name + ".json"), meta)
+
+
+def history_index() -> dict:
+    """返回 name -> mtime 映射，并保证 _hist_meta 与磁盘一致。"""
+    global _hist_sig
+    with _hist_lock:
+        images, sidecars = {}, {}
+        try:
+            for entry in OUTPUT_DIR.iterdir():
+                if not entry.is_file():
+                    continue
+                ext = entry.suffix.lower()
+                try:
+                    if ext in IMAGE_EXTS:
+                        images[entry.name] = entry.stat().st_mtime
+                    elif ext == ".json":
+                        sidecars[entry.name] = entry.stat().st_mtime
+                except OSError:
+                    continue
+        except OSError:
+            return {}
+        sig = (tuple(sorted(images.items())), tuple(sorted(sidecars.items())))
+        if sig != _hist_sig:
+            for name in [n for n in _hist_meta if n not in images]:
+                _hist_meta.pop(name, None)
+                _hist_mtime.pop(name, None)
+                _hist_sc_mtime.pop(name, None)
+            for name, mtime in images.items():
+                sc_mtime = sidecars.get(name + ".json")
+                if (name not in _hist_meta or _hist_mtime.get(name) != mtime
+                        or _hist_sc_mtime.get(name) != sc_mtime):
+                    _hist_meta[name] = _read_meta(OUTPUT_DIR / name)
+                    _hist_mtime[name] = mtime
+                    _hist_sc_mtime[name] = sc_mtime
+            _hist_sig = sig
+        return images
+
+
 @app.get("/api/history")
 def history():
     page = max(1, request.args.get("page", 1, type=int))
@@ -775,20 +1052,15 @@ def history():
     provider_name = (request.args.get("provider") or "").strip()
     rng = request.args.get("range") or "all"
     sort = request.args.get("sort") or "newest"
+    only_fav = request.args.get("favorite") in ("1", "true")
     now = time.time()
 
+    images = history_index()
     entries = []
     model_facets, provider_facets = set(), set()
-    files = sorted(
-        (p for pat in ("*.webp", "*.png", "*.jpg", "*.jpeg", "*.gif") for p in OUTPUT_DIR.glob(pat)),
-        key=lambda p: p.name, reverse=True,
-    )
-    for p in files:
-        try:
-            mtime = p.stat().st_mtime
-        except OSError:
-            continue
-        meta = _read_meta(p)
+    for name in sorted(images, reverse=True):
+        meta = _hist_meta.get(name) or {}
+        mtime = images[name]
         created = float(meta.get("created") or mtime)
         m, pv = meta.get("model", ""), meta.get("provider", "")
         if m:
@@ -801,30 +1073,28 @@ def history():
             continue
         if provider_name and pv != provider_name:
             continue
+        if only_fav and not meta.get("favorite"):
+            continue
         if rng in _RANGE_SPANS and now - created > _RANGE_SPANS[rng]:
             continue
-        entries.append((p, meta))
+        entries.append((name, mtime, meta))
 
     if sort == "fastest":
-        entries.sort(key=lambda e: (e[1].get("elapsed") is None, e[1].get("elapsed") or 0))
+        entries.sort(key=lambda e: (e[2].get("elapsed") is None, e[2].get("elapsed") or 0))
     elif sort == "model":
-        entries.sort(key=lambda e: e[1].get("model", ""))
+        entries.sort(key=lambda e: e[2].get("model", ""))
     else:
-        entries.sort(key=lambda e: e[0].name, reverse=True)
+        entries.sort(key=lambda e: e[0], reverse=True)
 
     total = len(entries)
     pages = max(1, -(-total // page_size))
     page = min(page, pages)
 
     items = []
-    for p, meta in entries[(page - 1) * page_size : page * page_size]:
-        try:
-            mtime = p.stat().st_mtime
-        except OSError:
-            continue  # 扫描间隙被删除的文件直接跳过，不让整页 500
+    for name, mtime, meta in entries[(page - 1) * page_size : page * page_size]:
         items.append({
-            "name": p.name,
-            "url": f"/outputs/{p.name}",
+            "name": name,
+            "url": f"/outputs/{name}",
             "mtime": mtime,
             "model": meta.get("model", ""),
             "provider": meta.get("provider", ""),
@@ -837,6 +1107,7 @@ def history():
             "reference_name": meta.get("reference_name", ""),
             "failover": bool(meta.get("failover", False)),
             "failover_from": meta.get("failover_from", ""),
+            "favorite": bool(meta.get("favorite", False)),
             "created_time": meta.get("created_time", time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(mtime))),
         })
     return jsonify({
@@ -845,16 +1116,74 @@ def history():
     })
 
 
+@app.get("/api/history/export")
+def history_export():
+    """导出全部元数据用于备份；不含图片本体，体积小，可随时重导。"""
+    images = history_index()
+    records = [
+        {"name": name, "url": f"/outputs/{name}", "mtime": images[name], **(_hist_meta.get(name) or {})}
+        for name in sorted(images, reverse=True)
+    ]
+    body = json.dumps({"app": "image-studio", "version": APP_VERSION,
+                       "exported_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                       "count": len(records), "items": records}, ensure_ascii=False, indent=2)
+    fname = f"image-studio-history-{time.strftime('%Y%m%d-%H%M%S')}.json"
+    return Response(body, mimetype="application/json",
+                    headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+
+
+@app.post("/api/favorite")
+def favorite():
+    """切换或显式设置收藏；写 sidecar 并同步内存索引。"""
+    body = request.get_json(force=True)
+    name = (body.get("name") or "").strip()
+    if not name or "/" in name or "\\" in name or ".." in name or not (OUTPUT_DIR / name).exists():
+        return jsonify({"error": "无效文件名"}), 400
+    meta = _read_meta(OUTPUT_DIR / name)
+    if "favorite" in body:
+        meta["favorite"] = bool(body["favorite"])
+    else:
+        meta["favorite"] = not meta.get("favorite", False)
+    _write_meta(name, meta)
+    with _hist_lock:
+        _hist_meta[name] = meta
+    return jsonify({"ok": True, "name": name, "favorite": meta["favorite"]})
+
+
 @app.post("/api/delete")
 def delete():
-    name = (request.get_json(force=True).get("name") or "").strip()
-    if not name or "/" in name or "\\" in name or ".." in name:
-        return jsonify({"error": "无效文件名"}), 400
-    for suffix in ("", ".json"):
-        f = OUTPUT_DIR / (name + suffix)
-        if f.exists():
-            f.unlink()
-    return jsonify({"ok": True})
+    body = request.get_json(force=True)
+    names = body.get("names") if isinstance(body.get("names"), list) else None
+    if not names and body.get("name"):
+        names = [body["name"]]
+    if not names:
+        return jsonify({"error": "请提供要删除的文件名"}), 400
+    if len(names) > 500:
+        return jsonify({"error": "一次最多删除 500 张"}), 400
+    cleaned = []
+    for name in names:
+        name = (name or "").strip()
+        if not name or "/" in name or "\\" in name or ".." in name:
+            return jsonify({"error": f"无效文件名：{name}"}), 400
+        cleaned.append(name)
+    deleted = 0
+    for name in cleaned:
+        removed = False
+        for suffix in ("", ".json"):
+            f = OUTPUT_DIR / (name + suffix)
+            if f.exists():
+                f.unlink()
+                removed = True
+        if removed:
+            deleted += 1
+    global _hist_sig
+    with _hist_lock:
+        for name in cleaned:
+            _hist_meta.pop(name, None)
+            _hist_mtime.pop(name, None)
+            _hist_sc_mtime.pop(name, None)
+        _hist_sig = None  # 强制下次扫描重建签名
+    return jsonify({"ok": True, "deleted": deleted})
 
 
 @app.get("/outputs/<path:name>")
@@ -863,7 +1192,6 @@ def outputs(name):
 
 
 if __name__ == "__main__":
-    import threading
     import webbrowser
 
     threading.Timer(1.0, lambda: webbrowser.open("http://127.0.0.1:7860")).start()
