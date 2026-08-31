@@ -1124,10 +1124,10 @@ def history_export():
         {"name": name, "url": f"/outputs/{name}", "mtime": images[name], **(_hist_meta.get(name) or {})}
         for name in sorted(images, reverse=True)
     ]
-    body = json.dumps({"app": "image-studio", "version": APP_VERSION,
+    body = json.dumps({"app": "ai-image-studio", "version": APP_VERSION,
                        "exported_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                        "count": len(records), "items": records}, ensure_ascii=False, indent=2)
-    fname = f"image-studio-history-{time.strftime('%Y%m%d-%H%M%S')}.json"
+    fname = f"ai-image-studio-history-{time.strftime('%Y%m%d-%H%M%S')}.json"
     return Response(body, mimetype="application/json",
                     headers={"Content-Disposition": f'attachment; filename="{fname}"'})
 

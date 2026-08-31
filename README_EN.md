@@ -1,9 +1,9 @@
 <div align="center">
-  <img src="static/assets/logo.png" alt="Image Studio · Shiguang" width="420">
-  <h1>Image Studio · Shiguang</h1>
+  <img src="static/assets/logo.png" alt="AI Image Studio · Shiguang" width="420">
+  <h1>AI Image Studio · Shiguang</h1>
   <p><b>A local-first, personal AI image-generation workbench & inspiration gallery — tailor-made for you</b><br>Pooled API keys · multi-model scheduling · batch shooting · metadata traceability · zero GPU / Node dependencies</p>
   <p>
-    <a href="https://github.com/lmz-666-lmz/image-studio"><img src="https://img.shields.io/badge/GitHub-Repo-181717.svg?logo=github" alt="GitHub"></a>
+    <a href="https://github.com/lmz-666-lmz/ai-image-studio"><img src="https://img.shields.io/badge/GitHub-Repo-181717.svg?logo=github" alt="GitHub"></a>
     <img src="https://img.shields.io/badge/Version-v1.0.3-e2ad62.svg" alt="v1.0.3">
     <img src="https://img.shields.io/badge/License-MIT-2ea44f.svg" alt="MIT">
     <img src="https://img.shields.io/badge/Python-3.10+-3776ab.svg?logo=python" alt="Python 3.10+">
@@ -57,8 +57,8 @@ Shiguang is a **local-first, personal AI image-generation workbench and inspirat
 ## 🚀 Quick start
 
 ```bash
-git clone https://github.com/lmz-666-lmz/image-studio.git
-cd image-studio
+git clone https://github.com/lmz-666-lmz/ai-image-studio.git
+cd ai-image-studio
 pip install -r requirements.txt   # Flask is the only dependency
 python app.py                     # opens http://127.0.0.1:7860
 ```
@@ -187,7 +187,7 @@ With failover enabled, a clear line-level failure on the active provider trigger
 ## 📁 Project structure
 
 ```text
-image-studio/
+ai-image-studio/
 ├── app.py              # single-file backend: API, capability detection, batch queue, health & failover
 ├── requirements.txt    # Flask only
 ├── config.example.json # configuration template
@@ -233,4 +233,4 @@ Yes. Legacy single-provider `api_base` / `api_key` configs auto-migrate to the p
 
 ---
 
-MIT License · Image Studio · Shiguang · v1.0.3
+MIT License · AI Image Studio · Shiguang · v1.0.3

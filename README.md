@@ -1,9 +1,9 @@
 <div align="center">
-  <img src="static/assets/logo.png" alt="Image Studio · 拾光" width="420">
-  <h1>Image Studio · 拾光</h1>
+  <img src="static/assets/logo.png" alt="AI Image Studio · 拾光" width="420">
+  <h1>AI Image Studio · 拾光</h1>
   <p><b>为你量身打造的本地优先 · 个人 AI 生图工作台与灵感画廊</b><br>聚合各路 API Key · 多模型调度 · 批量连拍 · 元数据追溯 · 零 GPU / Node 依赖</p>
   <p>
-    <a href="https://github.com/lmz-666-lmz/image-studio"><img src="https://img.shields.io/badge/GitHub-Repo-181717.svg?logo=github" alt="GitHub"></a>
+    <a href="https://github.com/lmz-666-lmz/ai-image-studio"><img src="https://img.shields.io/badge/GitHub-Repo-181717.svg?logo=github" alt="GitHub"></a>
     <img src="https://img.shields.io/badge/Version-v1.0.3-e2ad62.svg" alt="v1.0.3">
     <img src="https://img.shields.io/badge/License-MIT-2ea44f.svg" alt="MIT">
     <img src="https://img.shields.io/badge/Python-3.10+-3776ab.svg?logo=python" alt="Python 3.10+">
@@ -57,8 +57,8 @@
 ## 🚀 快速开始
 
 ```bash
-git clone https://github.com/lmz-666-lmz/image-studio.git
-cd image-studio
+git clone https://github.com/lmz-666-lmz/ai-image-studio.git
+cd ai-image-studio
 pip install -r requirements.txt   # 仅 Flask 一个依赖
 python app.py                     # 自动打开 http://127.0.0.1:7860
 ```
@@ -187,7 +187,7 @@ python app.py                     # 自动打开 http://127.0.0.1:7860
 ## 📁 项目结构
 
 ```text
-image-studio/
+ai-image-studio/
 ├── app.py              # 单文件后端：API、能力识别、连拍队列、健康检测与 failover
 ├── requirements.txt    # 仅 Flask
 ├── config.example.json # 配置模板
@@ -233,4 +233,4 @@ image-studio/
 
 ---
 
-MIT License · Image Studio · 拾光 · v1.0.3
+MIT License · AI Image Studio · 拾光 · v1.0.3
