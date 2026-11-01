@@ -4,7 +4,7 @@
   <p><b>为你量身打造的本地优先 · 个人 AI 生图工作台与灵感画廊</b><br>聚合各路 API Key · 多模型调度 · 一条提示词多张出图 · 元数据追溯 · 零 GPU / Node 依赖</p>
   <p>
     <a href="https://github.com/lmz-666-lmz/ai-image-studio"><img src="https://img.shields.io/badge/GitHub-Repo-181717.svg?logo=github" alt="GitHub"></a>
-    <img src="https://img.shields.io/badge/Version-v1.2.0-e2ad62.svg" alt="v1.2.0">
+    <img src="https://img.shields.io/badge/Version-v1.3.0-e2ad62.svg" alt="v1.3.0">
     <img src="https://img.shields.io/badge/License-MIT-2ea44f.svg" alt="MIT">
     <img src="https://img.shields.io/badge/Python-3.10+-3776ab.svg?logo=python" alt="Python 3.10+">
     <img src="https://img.shields.io/badge/GPU-Not%20Required-8e7cc3.svg" alt="No GPU required">
@@ -139,7 +139,7 @@ python app.py                     # 自动打开 http://127.0.0.1:7860
 - `runtime_state.json`：健康检测等运行时状态，自动创建、可安全删除重建。
 - 三者与 `config.json` 均已加入 `.gitignore`。
 
-## 🎛 v1.2.0 功能清单
+## 🎛 v1.3.0 功能清单
 
 | 功能 | 说明 |
 |---|---|
@@ -155,6 +155,18 @@ python app.py                     # 自动打开 http://127.0.0.1:7860
 | **上游报错直译** | 生成失败时附上中转站返回的具体原因（`error.message` 等关键信息），不再只有一串 HTTP 状态码，排障不用再猜。 |
 | **安全故障切换** | 仅 401 / 403 / 404 / 429 / 502 / 503 / 504 或明确连接失败时切换一次同模型备用站；不确定超时不重试；补齐轮不再切换，避免同组图片风格跳变。 |
 | **本地历史与三套主题** | 瀑布流、筛选、分页、灯箱、显影动画；内存索引支撑上千张图片不卡顿。 |
+
+<details><summary><b>v1.3.0 相比 v1.2.0 的改进</b></summary>
+
+- **可达性补齐**：新增 `prefers-reduced-motion` 全局降级（关停全部循环动画）、统一的键盘 `:focus-visible` 焦点环；触屏设备上卡片操作浮岛改为常显（此前没有 hover 就无法触及）。
+- **弹窗退场动画**：灯箱与设置窗口关闭时平滑淡出（此前瞬间消失）；灯箱拖拽平移时禁用 transform 过渡，跟手不拖影。
+- **画廊滚动进场**：卡片改为进入视口时按序显现，首屏 stagger、下方内容滚动到才出现；视图模式（瀑布流 / 网格 / 巨幕）切换增加轻量重入场动画。
+- **细节动效**：收藏星星爆闪、进度条确定态流光与百分比读数、Toast 改为右侧滑入并区分 info 样式、空态画框漂浮、主题切换曝光光幕。
+- **修掉弹窗「闪一下」**：灯箱 / 设置 / Toast 的进场动画在 `animation` 简写里误用了 transition 变量，第二个时间值被 CSS 解析成延迟，导致元素先完整显示、再跳回透明、再淡入；现在延迟归零，开窗即平滑淡入。
+- **三主题一致性修复**：删除按钮 hover、输入报错环、健康脉冲、下拉箭头、显影相纸、生成按钮渐变深端等硬编码颜色全部令牌化，宣纸浅色主题不再串入暗色主题的色值。
+- **移动端补强**：网格 / 巨幕视图在窄屏下的列宽适配、批量操作栏与灯箱间距、Toast 全宽、设置面板小屏滚动。
+- **Bug 修复**：多张生成中「上游 URL 拉取失败」的条目不再混入完成张数；任务失败不再清空参考图（与单张生成行为一致）；不接收画幅的模型族显影占位卡不再带出旧画幅比例；中转站返回非 JSON 响应时给出可读的中文报错；**生成路径的上游报错现在真正附带中转站返回的具体原因**（此前健康记录先读走了错误响应体，前端看到的报错丢失了「额度不足」「模型不存在」等细节）。
+</details>
 
 <details><summary><b>v1.2.0 相比 v1.1.0 的改进</b></summary>
 
@@ -250,4 +262,4 @@ ai-image-studio/
 
 ---
 
-MIT License · AI Image Studio · 拾光 · v1.2.0
+MIT License · AI Image Studio · 拾光 · v1.3.0

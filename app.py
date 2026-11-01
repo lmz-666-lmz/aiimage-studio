@@ -22,7 +22,7 @@ from pathlib import Path
 
 from flask import Flask, Response, jsonify, request, send_from_directory
 
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.3.0"
 APP_AUTHOR = "lmz-666-lmz"
 
 SIZE_3_2 = ["1024x1024", "1536x1024", "1024x1536"]
@@ -340,8 +340,11 @@ def upstream(path: str, payload: dict | None = None, timeout: int = 300,
         method="POST" if payload is not None else "GET",
     )
     data, _ = _fetch(req, timeout)
-    return json.loads(data)
-
+    try:
+        return json.loads(data)
+    except ValueError as e:
+        # 中转站挂了或返回 HTML 错误页时，原始 JSONDecodeError 用户看不懂
+        raise ValueError("中转站返回了无法解析的响应（可能不是 JSON）") from e
 
 
 def with_tls_note(payload: dict) -> dict:
@@ -736,7 +739,10 @@ def upstream_multipart(path: str, fields: dict, files: list, timeout: int = 300,
                  "User-Agent": "Mozilla/5.0"},
     )
     data, _ = _fetch(req, timeout)
-    return json.loads(data)
+    try:
+        return json.loads(data)
+    except ValueError as e:
+        raise ValueError("中转站返回了无法解析的响应（可能不是 JSON）") from e
 
 
 def _ext_from(content_type: str, url: str) -> str:
@@ -890,9 +896,12 @@ def _call_with_failover(model: str, prov: dict, body: dict, call, allow_failover
         set_health(prov, "healthy")
         return data, prov, ""
     except Exception as primary_error:
-        set_health(prov, error_status(primary_error), error=friendly_error(primary_error))
+        # HTTPError 的响应体只能读一次：先取完整文案给健康记录，
+        # 再把同一份文案抛给前端，避免第二次读为空丢失上游原因
+        detail_msg = friendly_error(primary_error)
+        set_health(prov, error_status(primary_error), error=detail_msg)
         if not allow_failover or not config.get("failover_enabled") or not is_safe_failover_error(primary_error):
-            raise GenError(friendly_error(primary_error), cause=primary_error)
+            raise GenError(detail_msg, cause=primary_error)
         candidates = _providers_for_model(model, prov)
         if not candidates:
             raise GenError(f"主中转站失败，备用站没有同名模型（{model}）", cause=primary_error)
@@ -901,8 +910,9 @@ def _call_with_failover(model: str, prov: dict, body: dict, call, allow_failover
             data = call(body, backup)
             set_health(backup, "healthy")
         except Exception as backup_error:
-            set_health(backup, error_status(backup_error), error=friendly_error(backup_error))
-            raise GenError(f"主线路与备用线路均不可用：{friendly_error(backup_error)}", cause=backup_error)
+            backup_msg = friendly_error(backup_error)
+            set_health(backup, error_status(backup_error), error=backup_msg)
+            raise GenError(f"主线路与备用线路均不可用：{backup_msg}", cause=backup_error)
         with CONFIG_LOCK:
             config["active_provider"] = backup["id"]
             save_config()

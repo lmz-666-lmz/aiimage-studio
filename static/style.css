@@ -52,6 +52,10 @@
   --glass-dock: rgba(19, 16, 12, 0.88);
   --danger: #e2634e;
   --success: #52c48d;
+  /* 主题专用：下拉箭头 / 显影相纸底色 / 生成按钮渐变深端 */
+  --select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23ab9a82' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E");
+  --dev-bg: #0f0a07;
+  --go-deep: #6b3d0c;
 }
 
 /* 主题 2：黛夜 (ink) - 幽邃蓝墨、深空钛青与月华冷光 */
@@ -82,6 +86,10 @@ html[data-theme="ink"] {
   --glass-dock: rgba(13, 18, 34, 0.9);
   --danger: #f07178;
   --success: #4cd398;
+  /* 主题专用：下拉箭头 / 显影相纸底色 / 生成按钮渐变深端 */
+  --select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%239aa7cc' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E");
+  --dev-bg: #070a14;
+  --go-deep: #35406e;
 }
 
 /* 主题 3：宣纸 (paper) - 典雅宋瓷米宣、丹砂朱印与古木微温 */
@@ -112,6 +120,10 @@ html[data-theme="paper"] {
   --glass-dock: rgba(246, 241, 231, 0.93);
   --danger: #bf3f2a;
   --success: #388e5e;
+  /* 主题专用：下拉箭头 / 显影相纸底色 / 生成按钮渐变深端（浅色主题用深sepia保住暗房感） */
+  --select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%238a7154' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E");
+  --dev-bg: #262019;
+  --go-deep: #7e2417;
 }
 
 /* ---------- 基础排版与重置 ---------- */
@@ -165,6 +177,29 @@ body::after {
 *::-webkit-scrollbar-thumb:hover {
   background: var(--faint);
   background-clip: padding-box;
+}
+
+/* ---------- 可达性基线 (Accessibility) ---------- */
+/* 键盘焦点环：只在 Tab 聚焦时出现，不干扰鼠标点击 */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* 触屏设备没有 hover：卡片操作浮岛常显，去掉悬浮位移 */
+@media (hover: none) {
+  .print-actions-overlay { opacity: 1; transform: none; }
+  .print:hover { transform: none; }
+  .print:hover img { transform: none; }
+}
+
+/* 减少动态效果：关停循环与装饰动画，过渡缩到最短 */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 /* ==========================================================================
@@ -304,7 +339,7 @@ body::after {
 
 .quick-theme-dot:hover { transform: scale(1.2); }
 .quick-theme-dot.on {
-  border-color: #ffffff;
+  border-color: var(--text);
   box-shadow: 0 0 8px currentColor;
   transform: scale(1.15);
 }
@@ -387,7 +422,7 @@ body::after {
 }
 .rs-dot.healthy + .rs-pulse {
   animation: beacon-ping 2.2s cubic-bezier(0, 0, 0.2, 1) infinite;
-  background: rgba(82, 196, 141, 0.35);
+  background: color-mix(in srgb, var(--success) 35%, transparent);
 }
 
 .rs-dot.slow {
@@ -698,7 +733,7 @@ body::after {
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-md);
   box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.2);
-  animation: slide-down 0.2s var(--transition-base);
+  animation: slide-down 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @keyframes slide-down {
@@ -1126,7 +1161,7 @@ textarea:focus, input[type=text]:focus, input[type=password]:focus, input[type=n
   font-size: 12px;
   font-family: var(--font-mono);
 }
-.size-custom.invalid { border-color: var(--danger); box-shadow: 0 0 0 2px rgba(226, 99, 78, 0.2); }
+.size-custom.invalid { border-color: var(--danger); box-shadow: 0 0 0 2px color-mix(in srgb, var(--danger) 20%, transparent); }
 .size-hint { color: var(--faint); font-size: 11px; font-family: var(--font-mono); }
 .size-hint.bad { color: var(--danger); }
 
@@ -1237,7 +1272,7 @@ textarea:focus, input[type=text]:focus, input[type=password]:focus, input[type=n
   appearance: none;
   -webkit-appearance: none;
   cursor: pointer;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23ab9a82' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-image: var(--select-arrow);
   background-repeat: no-repeat;
   background-position: right 8px center;
   transition: all var(--transition-fast);
@@ -1274,7 +1309,7 @@ textarea:focus, input[type=text]:focus, input[type=password]:focus, input[type=n
 .go {
   position: relative;
   height: 52px;
-  background: linear-gradient(135deg, var(--accent-2) 0%, var(--accent) 55%, color-mix(in srgb, var(--accent) 72%, #6b3d0c) 100%);
+  background: linear-gradient(135deg, var(--accent-2) 0%, var(--accent) 55%, color-mix(in srgb, var(--accent) 72%, var(--go-deep)) 100%);
   border: none;
   border-radius: var(--radius-lg);
   color: var(--on-accent);
@@ -1368,12 +1403,28 @@ textarea:focus, input[type=text]:focus, input[type=password]:focus, input[type=n
 
 .progress-track > i {
   display: block;
+  position: relative;
+  overflow: hidden;
   height: 100%;
   width: 0;
   border-radius: var(--radius-pill);
   background: linear-gradient(90deg, var(--accent-2), var(--accent));
   box-shadow: 0 0 12px var(--accent);
   transition: width 0.45s ease;
+}
+
+/* 确定态流光：填充上扫过一道高光，暗示仍在推进 */
+.progress:not(.indet) .progress-track > i::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.4), transparent);
+  transform: translateX(-100%);
+  animation: fill-sheen 1.6s ease-in-out infinite;
+}
+
+@keyframes fill-sheen {
+  to { transform: translateX(100%); }
 }
 
 .progress.indet .progress-track > i {
@@ -1518,7 +1569,7 @@ textarea:focus, input[type=text]:focus, input[type=password]:focus, input[type=n
   appearance: none;
   -webkit-appearance: none;
   cursor: pointer;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23ab9a82' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-image: var(--select-arrow);
   background-repeat: no-repeat;
   background-position: right 12px center;
   transition: all var(--transition-fast);
@@ -1801,24 +1852,6 @@ textarea:focus, input[type=text]:focus, input[type=password]:focus, input[type=n
   margin-left: auto;
 }
 
-.print .meta a {
-  color: var(--dim);
-  text-decoration: none;
-  flex: none;
-  font-size: 11px;
-  padding: 2px 7px;
-  border-radius: var(--radius-sm);
-  background: var(--raised);
-  border: 1px solid var(--line);
-  transition: all var(--transition-fast);
-}
-
-.print .meta a:hover {
-  color: var(--accent);
-  border-color: var(--accent);
-  background: var(--accent-soft);
-}
-
 /* 批量管理多选状态 */
 .print.selected {
   border-color: var(--accent);
@@ -1855,7 +1888,7 @@ textarea:focus, input[type=text]:focus, input[type=password]:focus, input[type=n
 .developing {
   position: relative;
   border-radius: var(--radius-md);
-  background: #0f0a07;
+  background: var(--dev-bg);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -1998,8 +2031,8 @@ textarea:focus, input[type=text]:focus, input[type=password]:focus, input[type=n
   color: var(--danger);
 }
 .ghost.batch-del:hover {
-  background: rgba(226, 99, 78, 0.15);
-  box-shadow: 0 0 14px rgba(226, 99, 78, 0.25);
+  background: color-mix(in srgb, var(--danger) 15%, transparent);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--danger) 25%, transparent);
 }
 
 /* ---------- 分页组件 (Pagination) ---------- */
@@ -2058,6 +2091,7 @@ textarea:focus, input[type=text]:focus, input[type=password]:focus, input[type=n
 }
 
 .pg-nums { display: flex; gap: 6px; }
+.pg-dots { color: var(--faint); font-family: var(--font-mono); padding: 0 2px; user-select: none; }
 .pg-jump {
   display: flex;
   align-items: center;
@@ -2170,7 +2204,7 @@ textarea:focus, input[type=text]:focus, input[type=password]:focus, input[type=n
   justify-content: center;
   padding: 30px;
   z-index: 100;
-  animation: lb-fadein 0.25s var(--transition-base);
+  animation: lb-fadein 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @keyframes lb-fadein {
@@ -2214,6 +2248,9 @@ textarea:focus, input[type=text]:focus, input[type=password]:focus, input[type=n
 }
 
 .lightbox .stage.panning { cursor: grabbing; }
+
+/* 拖拽平移中：去掉 img 的 transform 过渡，跟手不拖影 */
+.lightbox img.dragging { transition: none; cursor: grabbing; }
 
 .lightbox img {
   max-width: 100%;
@@ -2604,6 +2641,16 @@ textarea:focus, input[type=text]:focus, input[type=password]:focus, input[type=n
   gap: 8px;
 }
 
+.prov-empty {
+  margin: 0;
+  padding: 14px 12px;
+  color: var(--faint);
+  font-size: 12.5px;
+  text-align: center;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-md);
+}
+
 .prov-card {
   padding: 12px 14px;
   background: var(--raised);
@@ -2664,7 +2711,7 @@ textarea:focus, input[type=text]:focus, input[type=password]:focus, input[type=n
 }
 
 .prov-btn:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
-.prov-btn.danger:hover { color: var(--danger); border-color: var(--danger); background: rgba(226, 99, 78, 0.15); }
+.prov-btn.danger:hover { color: var(--danger); border-color: var(--danger); background: color-mix(in srgb, var(--danger) 15%, transparent); }
 .prov-btn.on { color: var(--accent); border-color: var(--accent); font-weight: 700; }
 
 .prov-facts {
@@ -2854,7 +2901,7 @@ textarea:focus, input[type=text]:focus, input[type=password]:focus, input[type=n
   font-size: 12.5px;
   font-weight: 500;
   box-shadow: 0 10px 32px var(--shadow), 0 0 16px var(--accent-soft);
-  animation: toast-spring 0.35s var(--transition-spring) forwards;
+  animation: toast-spring 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
   transition: opacity 0.25s ease, transform 0.25s ease;
 }
 
@@ -2868,8 +2915,8 @@ textarea:focus, input[type=text]:focus, input[type=password]:focus, input[type=n
 }
 
 @keyframes toast-spring {
-  from { opacity: 0; transform: translateY(-16px) scale(0.92); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
+  from { opacity: 0; transform: translateX(26px) scale(0.95); }
+  to { opacity: 1; transform: translateX(0) scale(1); }
 }
 
 .toast.toast-fadeout {
@@ -2878,10 +2925,74 @@ textarea:focus, input[type=text]:focus, input[type=password]:focus, input[type=n
 }
 
 /* ==========================================================================
+   v1.3.0 · 动效与可达性补充 (Motion & A11y Additions)
+   ========================================================================== */
+
+/* 弹窗关闭退场：JS 加 .closing，动画播完再置 hidden（灯箱与设置共用 .lightbox） */
+.lightbox.closing {
+  animation: lb-fadeout 0.18s ease forwards;
+  pointer-events: none;
+}
+
+@keyframes lb-fadeout {
+  to { opacity: 0; transform: scale(0.985); }
+}
+
+/* 收藏星爆闪：JS 在收藏成功时加一次性 .fav-pop */
+.print .meta .fav.fav-pop {
+  animation: fav-pop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes fav-pop {
+  0% { transform: scale(0.4); }
+  55% { transform: scale(1.5); }
+  100% { transform: scale(1); }
+}
+
+/* 画廊卡片滚动进场：观察器给进入视口的卡片加 .reveal-in */
+.print.reveal {
+  opacity: 0;
+  transform: translateY(18px);
+}
+.print.reveal-in {
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 0.5s var(--transition-smooth), transform 0.5s var(--transition-smooth);
+}
+
+/* 主题切换光幕：JS 触发一次曝光闪动，让整体换色更有仪式感 */
+#theme-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  pointer-events: none;
+  background: var(--accent);
+  opacity: 0;
+  mix-blend-mode: soft-light;
+}
+
+/* 空态画框轻轻漂浮 */
+.empty-mark {
+  animation: empty-float 6s ease-in-out infinite;
+}
+
+@keyframes empty-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+
+/* Toast 分类：info 走中性低调，成功 / 错误由基础规则着色 */
+.toast.toast-info {
+  border-color: var(--line);
+  color: var(--dim);
+}
+
+/* ==========================================================================
    响应式与自适应优化 (Responsive Adaptation)
    ========================================================================== */
 @media (max-width: 1180px) {
   .masonry { columns: 280px 2; }
+  .wall.mode-grid #gallery { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
 }
 
 @media (max-width: 960px) {
@@ -2891,6 +3002,11 @@ textarea:focus, input[type=text]:focus, input[type=password]:focus, input[type=n
   .wall { padding: 20px 16px 40px; }
   .lb-body { flex-direction: column; }
   .lb-info { width: auto; border-left: none; border-top: 1px solid var(--line); padding: 14px 2px 2px; }
+  .wall.mode-grid #gallery { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 14px; }
+  .wall.mode-cinema #gallery { grid-template-columns: 1fr; gap: 16px; }
+  .lightbox { padding: 12px; }
+  .lightbox .stage { min-height: 240px; }
+  .batch-bar { max-width: calc(100vw - 24px); padding: 10px 14px; gap: 10px; }
 }
 
 @media (max-width: 640px) {
@@ -2898,4 +3014,9 @@ textarea:focus, input[type=text]:focus, input[type=password]:focus, input[type=n
   .ratios { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .filter-actions { margin-left: 0; width: 100%; justify-content: space-between; }
   .param-grid { grid-template-columns: repeat(1, minmax(0, 1fr)); }
+  .wall.mode-grid #gallery { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .filters { padding: 12px; gap: 10px; }
+  .toast-container { left: 16px; right: 16px; top: 12px; }
+  .toast { width: 100%; }
+  .batch-btns .ghost { padding: 0 10px; font-size: 11.5px; }
 }

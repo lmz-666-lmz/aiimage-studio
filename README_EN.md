@@ -4,7 +4,7 @@
   <p><b>A local-first, personal AI image-generation workbench & inspiration gallery — tailor-made for you</b><br>Pooled API keys · multi-model scheduling · batch shooting · metadata traceability · zero GPU / Node dependencies</p>
   <p>
     <a href="https://github.com/lmz-666-lmz/ai-image-studio"><img src="https://img.shields.io/badge/GitHub-Repo-181717.svg?logo=github" alt="GitHub"></a>
-    <img src="https://img.shields.io/badge/Version-v1.2.0-e2ad62.svg" alt="v1.2.0">
+    <img src="https://img.shields.io/badge/Version-v1.3.0-e2ad62.svg" alt="v1.3.0">
     <img src="https://img.shields.io/badge/License-MIT-2ea44f.svg" alt="MIT">
     <img src="https://img.shields.io/badge/Python-3.10+-3776ab.svg?logo=python" alt="Python 3.10+">
     <img src="https://img.shields.io/badge/GPU-Not%20Required-8e7cc3.svg" alt="No GPU required">
@@ -139,7 +139,7 @@ Model-family detection covers `gpt-image`, `dall-e`, `nano-banana / banana`, `ge
 - `runtime_state.json` — runtime state such as health records; created automatically, safe to delete.
 - These and `config.json` are all in `.gitignore`.
 
-## 🎛 v1.2.0 feature list
+## 🎛 v1.3.0 feature list
 
 | Feature | Details |
 |---|---|
@@ -155,6 +155,18 @@ Model-family detection covers `gpt-image`, `dall-e`, `nano-banana / banana`, `ge
 | **Upstream errors, translated** | Generation failures now append the concrete reason returned by the relay (the `error.message` and friends), instead of a bare HTTP status code. |
 | **Safe failover** | Only on 401 / 403 / 404 / 429 / 502 / 503 / 504 or a clear connection failure, one retry against a backup that caches the same model; never on ambiguous timeouts, and never mid-batch, so one group of images keeps a consistent look. |
 | **Local history & three themes** | Masonry wall, filters, pagination, lightbox, developing animation; an in-memory index keeps it fast with thousands of images. |
+
+<details><summary><b>Changes since v1.2.0</b></summary>
+
+- **Accessibility pass** — a global `prefers-reduced-motion` fallback (all looping animations stop), a consistent keyboard `:focus-visible` ring, and the card action overlay is now always visible on touch devices (it was hover-only and unreachable there).
+- **Dialog exit animations** — the lightbox and settings window fade out smoothly on close (previously they vanished instantly); panning in the lightbox disables the transform transition so dragging tracks the pointer 1:1.
+- **Scroll-reveal gallery** — cards now animate in as they enter the viewport (staggered above the fold); switching between Masonry / Grid / Cinema gets a light re-entrance animation.
+- **Micro-interactions** — favorite star pop, determinate progress shimmer with percentage readout, toasts slide in from the right with a distinct info style, floating empty-state frame, and an exposure veil on theme switch.
+- **Dialog "blink" fixed** — the lightbox / settings / toast entrance animations passed a transition variable inside the `animation` shorthand, so its second time value was parsed as a 250–500 ms delay: the dialog rendered fully, snapped invisible, then faded in. The delay is now zero and dialogs fade in directly.
+- **Cross-theme consistency fixes** — danger hovers, invalid-input rings, the health pulse, dropdown chevrons, the developing-paper backdrop and the generate-button gradient tail are all token-driven now, so the light paper theme no longer inherits dark-theme color values.
+- **Mobile hardening** — grid/cinema column adaptation at narrow widths, batch-bar and lightbox spacing, full-width toasts, scrollable settings panel on small screens.
+- **Bug fixes** — entries whose upstream URL fetch failed no longer count toward completed images; a failed batch task no longer clears the reference images (consistent with single-image generation); the developing placeholder no longer inherits a stale size for families that reject sizes; non-JSON relay responses now produce a readable Chinese error; and **generation-path errors now really carry the relay's own reason** (the health record used to consume the error body first, so the user-facing message lost details like "insufficient quota").
+</details>
 
 <details><summary><b>Changes since v1.1.0</b></summary>
 
@@ -250,4 +262,4 @@ Yes. Legacy single-provider `api_base` / `api_key` configs auto-migrate to the p
 
 ---
 
-MIT License · AI Image Studio · Shiguang · v1.2.0
+MIT License · AI Image Studio · Shiguang · v1.3.0

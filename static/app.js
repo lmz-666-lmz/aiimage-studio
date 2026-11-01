@@ -229,7 +229,9 @@ function enterRail() {
 
 function themePulse() {
   if (!gsapOK) return;
-  gsap.fromTo("body", { autoAlpha: 0.82 }, { autoAlpha: 1, duration: 0.35, ease: "power1.out", clearProps: "opacity,visibility" });
+  const veil = document.getElementById("theme-veil");
+  if (veil) gsap.fromTo(veil, { opacity: 0.3 }, { opacity: 0, duration: 0.55, ease: "power2.out", clearProps: "opacity" });
+  gsap.fromTo("body", { autoAlpha: 0.86 }, { autoAlpha: 1, duration: 0.35, ease: "power1.out", clearProps: "opacity,visibility" });
 }
 
 /* ---------- 设置 ---------- */
@@ -803,9 +805,37 @@ document.querySelectorAll(".theme-btn").forEach((btn) => {
 });
 
 const settingsEl = $("settings");
-$("open-settings").addEventListener("click", () => { settingsEl.hidden = false; setMsg(""); refreshHealth(false); });
-$("set-close").addEventListener("click", () => { settingsEl.hidden = true; closeProviderForm(); loadSettings(); });
-settingsEl.addEventListener("click", (e) => { if (e.target === settingsEl) { settingsEl.hidden = true; closeProviderForm(); loadSettings(); } });
+
+/* 带退场动画地关闭弹窗（灯箱与设置共用 .lightbox 的 closing 关键帧） */
+function closeOverlayAnimated(el, after) {
+  if (el.hidden || el.classList.contains("closing")) return;
+  if (reduceMotion) {
+    el.hidden = true;
+    if (after) after();
+    return;
+  }
+  el.classList.add("closing");
+  setTimeout(() => {
+    if (!el.classList.contains("closing")) return; // 期间被重新打开
+    el.classList.remove("closing");
+    el.hidden = true;
+    if (after) after();
+  }, 180);
+}
+
+function closeSettings() {
+  closeProviderForm();
+  closeOverlayAnimated(settingsEl, loadSettings);
+}
+
+function openSettings() {
+  settingsEl.classList.remove("closing"); // 关闭动画中途重新打开
+  settingsEl.hidden = false;
+}
+
+$("open-settings").addEventListener("click", () => { openSettings(); setMsg(""); refreshHealth(false); });
+$("set-close").addEventListener("click", closeSettings);
+settingsEl.addEventListener("click", (e) => { if (e.target === settingsEl) closeSettings(); });
 $("failover-toggle").addEventListener("change", async (e) => {
   try {
     const r = await fetch("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ failover_enabled: e.target.checked }) });
@@ -893,6 +923,43 @@ async function loadModels() {
   renderRailProvider();
 }
 
+/* ---------- 画廊卡片滚动进场 ---------- */
+/* 首屏卡片按序 stagger 显现；往下滚动才进入视口的卡片迟到时立即显现 */
+const revealDelays = new WeakMap();
+let revealBatchAt = 0;
+const revealObserver = !reduceMotion && "IntersectionObserver" in window
+  ? new IntersectionObserver((entries) => {
+      const staggered = performance.now() - revealBatchAt < 450;
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        const card = entry.target;
+        const delay = staggered ? (revealDelays.get(card) || 0) : 0;
+        card.style.transitionDelay = delay ? `${delay}ms` : "";
+        card.classList.add("reveal-in");
+        card.classList.remove("reveal");
+        card.addEventListener("transitionend", () => { card.style.transitionDelay = ""; }, { once: true });
+        revealObserver.unobserve(card);
+      }
+    }, { root: document.querySelector(".wall"), rootMargin: "60px 0px", threshold: 0.04 })
+  : null;
+
+function watchReveal(card, delay = 0) {
+  if (!revealObserver) return;   // 减少动态效果或浏览器过旧：直接显示
+  revealDelays.set(card, delay);
+  card.classList.add("reveal");
+  revealObserver.observe(card);
+}
+
+/* 兜底：观察器万一没触发（容器尺寸异常等），1.5s 后强制显现，绝不留隐形卡片 */
+function revealSafetyNet() {
+  setTimeout(() => {
+    document.querySelectorAll("#gallery .print.reveal").forEach((c) => {
+      c.classList.remove("reveal");
+      c.classList.add("reveal-in");
+    });
+  }, 1500);
+}
+
 /* ---------- 历史墙：分页 + 筛选 ---------- */
 function renderPager() {
   const pager = $("pager");
@@ -961,9 +1028,11 @@ async function loadHistory(p = page) {
       }
     }
     renderRequestPreview(capabilityFor(modelInput.value));
-    if (gsapOK && d.items.length) {
-      gsap.from("#gallery .print", { y: 24, autoAlpha: 0, duration: 0.5, stagger: 0.05, ease: "power3.out", clearProps: "all" });
-    }
+    // 滚动进场取代一次性全量动画：视口内的按序显现，视口外的滚到再显现
+    revealBatchAt = performance.now();
+    let vi = 0;
+    for (const card of g.querySelectorAll(".print")) watchReveal(card, Math.min(vi++, 9) * 45);
+    revealSafetyNet();
     document.querySelector(".wall").scrollTo({ top: 0 });
   } catch { /* 加载失败不阻塞 */ }
 }
@@ -1087,9 +1156,9 @@ function makeCard(item, fresh) {
   card.className = "print" + (selected.has(item.name) ? " selected" : "");
   card.dataset.name = item.name || "";
   const secs = item.elapsed != null ? `<span class="secs">${item.elapsed}s</span>` : "";
-  const model = item.model || "早期图片";
+  const model = item.model || (item.fetch_error ? "远端原图" : "早期图片");
   const date = item.created_time ? item.created_time.slice(5, 10) : "";
-  card.title = item.prompt || "";
+  card.title = item.prompt || item.fetch_error || "";
   card.innerHTML = `
     <div class="print-img-wrap">
       <img src="${item.url}" alt="生成的图片" loading="lazy">
@@ -1167,7 +1236,14 @@ async function toggleFavorite(item) {
     const wall = wallItems.find((w) => w.name === item.name);
     if (wall && wall !== item) wall.favorite = d.favorite;
     const btn = document.querySelector(`#gallery .print[data-name="${cssEscape(item.name)}"] .fav`);
-    if (btn) btn.classList.toggle("on", d.favorite);
+    if (btn) {
+      btn.classList.toggle("on", d.favorite);
+      if (d.favorite) {           // 收藏成功：星星爆闪一下（reduced-motion 下 CSS 自动降级）
+        btn.classList.remove("fav-pop");
+        void btn.offsetWidth;     // 强制重排以重启动画
+        btn.classList.add("fav-pop");
+      }
+    }
     if (!lightboxEl.hidden && lbName === item.name) renderLbFav(d.favorite);
     showToast(d.favorite ? "已加入收藏 ★" : "已移出收藏", "info");
   } catch (e) { setGenMsg("收藏失败：" + e.message); showToast("收藏失败：" + e.message, "error"); }
@@ -1246,7 +1322,7 @@ function showProgress(done, total) {
   const pct = total > 1 ? Math.round((done / total) * 100) : 0;
   box.classList.toggle("indet", total <= 1);
   $("progress-fill").style.width = total > 1 ? `${pct}%` : "";
-  $("progress-text").textContent = total > 1 ? `${done}/${total} 张` : "生成中…";
+  $("progress-text").textContent = total > 1 ? `${done}/${total} 张 · ${pct}%` : "生成中…";
 }
 
 function hideProgress() {
@@ -1335,7 +1411,9 @@ const GO_HTML = '<span class="go-spark" aria-hidden="true">✦</span><span class
 function makeDevelopingCard(label) {
   const card = document.createElement("div");
   card.className = "print";
-  const [w, h] = size.split("x");
+  // 不接收画幅的模型族（如 grok image）用 1:1 占位，不带出上一个模型遗留的 size
+  const devCap = capabilityFor(modelInput?.value || "");
+  const [w, h] = (devCap.size_mode === "none" ? "1024x1024" : size).split("x");
   card.innerHTML = `
     <div class="developing" style="aspect-ratio:${w}/${h}">
       <div class="red-lamp"></div>
@@ -1396,7 +1474,8 @@ async function runTask(options, card, prompt, timer, n) {
   $("go").disabled = false;
   const labelEl = card.querySelector(".dev-label");
   const targetImages = d.target_images || d.target_n || n || 1;
-  let rendered = 0;
+  let rendered = 0;      // 已从任务快照消费掉的条目数（含拉取失败的）
+  let namedTotal = 0;    // 真正落盘、有文件名的图片数（用于计数与收尾提示）
   let closed = false;
 
   const finish = (t, fallbackMsg) => {
@@ -1407,7 +1486,7 @@ async function runTask(options, card, prompt, timer, n) {
     stopPolling();
     hideProgress();
     setGoIdle();
-    const okCount = t ? t.image_count : rendered;
+    const okCount = namedTotal;
     const errors = (t && t.errors) || [];
     if (fallbackMsg) setGenMsg(fallbackMsg);
     else if (!t) setGenMsg("任务已结束");
@@ -1415,7 +1494,7 @@ async function runTask(options, card, prompt, timer, n) {
     else if (t.status === "failed") setGenMsg(`生成失败：${errors[0]?.error || "未知错误"}`);
     else if (t.notice) setGenMsg(t.notice);
     else setGenMsg(`完成 ${okCount} 张`);
-    bumpWall(rendered);
+    bumpWall(namedTotal);
     if (rendered) pushPromptHistory(prompt);
     pushRecentModel((t && t.model) || "");
     if (t && t.images && t.images.length) {
@@ -1424,7 +1503,8 @@ async function runTask(options, card, prompt, timer, n) {
     }
     renderRailProvider();
     renderRequestPreview(capabilityFor((t && t.model) || modelInput.value));
-    if (referenceFiles.length) clearReference();
+    // 与同步路径保持一致：只在真的出过图后才清参考图，失败时保留以便直接重试
+    if (namedTotal && referenceFiles.length) clearReference();
   };
 
   taskPollTimer = setInterval(async () => {
@@ -1442,6 +1522,7 @@ async function runTask(options, card, prompt, timer, n) {
       const c = makeCard(freshImgs[i], true);
       c.querySelector("img").classList.add("develop");
       $("gallery").prepend(c);
+      if (freshImgs[i].name) namedTotal += 1;  // 上游 URL 拉取失败的条目不算张数
     }
     if (freshImgs.length) {
       wallItems.unshift(...freshImgs);
@@ -1523,13 +1604,14 @@ async function gen() {
     card.replaceWith(fresh);
     for (let i = images.length - 1; i >= 1; i--) $("gallery").prepend(makeCard(withResponseMeta(images[i]), true));
     wallItems.unshift(...images.map(withResponseMeta));
-    bumpWall(images.length);
+    const namedCount = images.filter((i) => i.name).length;  // 拉取失败的远端条目不计数
+    bumpWall(namedCount);
     pushPromptHistory(prompt);
     pushRecentModel(d.model);
     noteSpeed(d.model, d.elapsed);
     renderRailProvider();
     renderRequestPreview(capabilityFor(d.model));
-    setGenMsg(d.notice || `完成 ${images.length} 张 · 耗时 ${d.elapsed}s`);
+    setGenMsg(d.notice || `完成 ${namedCount} 张 · 耗时 ${d.elapsed}s`);
     if (d.warning) showToast(d.warning, "error");
     if (referenceFiles.length) clearReference();
   } catch (e) {
@@ -1735,15 +1817,17 @@ function openLightbox(url, name) {
     fillLbInfo({}); // 找不到条目时清空面板，避免残留上一张的信息
     extractPalette(lbImg);
   }
+  lightboxEl.classList.remove("closing"); // 关闭动画中途重新打开
   lightboxEl.hidden = false;
   if (gsapOK) gsap.from(".lightbox .frame", { y: 18, autoAlpha: 0, duration: 0.3, ease: "power2.out", clearProps: "all" });
 }
 
 function closeLightbox() {
-  lightboxEl.hidden = true;
-  lbImg.src = "";
-  const pal = $("lb-palette");
-  if (pal) pal.innerHTML = "";
+  closeOverlayAnimated(lightboxEl, () => {
+    lbImg.src = "";
+    const pal = $("lb-palette");
+    if (pal) pal.innerHTML = "";
+  });
 }
 
 $("lb-prev").addEventListener("click", () => showLbAt(lbIndex - 1));
@@ -1754,7 +1838,7 @@ lightboxEl.addEventListener("click", (e) => { if (e.target === lightboxEl) close
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     if (!lightboxEl.hidden) closeLightbox();
-    else if (!settingsEl.hidden) { settingsEl.hidden = true; closeProviderForm(); loadSettings(); }
+    else if (!settingsEl.hidden) closeSettings();
     else if (batchMode) setBatchMode(false);
     return;
   }
@@ -1899,6 +1983,8 @@ function setViewMode(mode) {
     b.classList.toggle("on", b.dataset.mode === mode);
   });
   lsSet(VIEW_MODE_KEY, mode);
+  // 布局切换时卡片轻量重入场，给模式切换一个可感知的反馈
+  if (gsapOK) gsap.from("#gallery .print", { y: 14, autoAlpha: 0, duration: 0.4, stagger: 0.03, ease: "power2.out", clearProps: "all" });
 }
 
 document.querySelectorAll(".view-btn").forEach((btn) => {
@@ -1962,7 +2048,7 @@ for (const id of ["quality", "background", "style"]) {
 }
 $("advanced-params").addEventListener("toggle", saveGenSettings);
 $("rs-switch").addEventListener("click", () => {
-  $("settings").hidden = false;
+  openSettings();
   setMsg("");
   refreshHealth(false);
 });
