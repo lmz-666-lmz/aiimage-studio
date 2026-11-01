@@ -4,7 +4,7 @@
   <p><b>A local-first, personal AI image-generation workbench & inspiration gallery — tailor-made for you</b><br>Pooled API keys · multi-model scheduling · batch shooting · metadata traceability · zero GPU / Node dependencies</p>
   <p>
     <a href="https://github.com/lmz-666-lmz/ai-image-studio"><img src="https://img.shields.io/badge/GitHub-Repo-181717.svg?logo=github" alt="GitHub"></a>
-    <img src="https://img.shields.io/badge/Version-v1.0.3-e2ad62.svg" alt="v1.0.3">
+    <img src="https://img.shields.io/badge/Version-v1.2.0-e2ad62.svg" alt="v1.2.0">
     <img src="https://img.shields.io/badge/License-MIT-2ea44f.svg" alt="MIT">
     <img src="https://img.shields.io/badge/Python-3.10+-3776ab.svg?logo=python" alt="Python 3.10+">
     <img src="https://img.shields.io/badge/GPU-Not%20Required-8e7cc3.svg" alt="No GPU required">
@@ -12,7 +12,7 @@
   <p><a href="README.md">中文</a> · <b>English</b> ｜ Author: <a href="https://github.com/lmz-666-lmz">lmz-666-lmz</a></p>
 
   <img src="screenshots/wall-darkroom.png" alt="Main UI · darkroom theme" width="100%">
-  <sub>darkroom theme · masonry history wall · multi-line batch queue · favorites & batch management</sub>
+<sub>darkroom theme · masonry history wall · three-step generation panel · favorites & batch management</sub>
 </div>
 
 ---
@@ -28,7 +28,7 @@ Shiguang is a **local-first, personal AI image-generation workbench and inspirat
 | Several relays, keys scattered everywhere, availability is a lottery | All providers aggregated in one window, health checks at a glance, safe failover to a backup on line failure |
 | Good images stuck in platform web pages; prompts lost, parameters unreproducible | A local gallery where every image keeps a sidecar JSON (prompt / model / size / elapsed time / route), with favorites, batch management and one-click export |
 | Heavy tooling demands a GPU and piles of dependencies just to use API generation | A single Flask dependency — `python app.py` and you're in |
-| Trying a batch of ideas means submitting the same form over and over | One prompt per line: multi-line input becomes a sequential batch queue with live progress and cancel-anytime |
+| Trying a batch of ideas means submitting the same form over and over | One prompt can produce 1–4 images, each appearing on the wall as it lands, with live progress and cancel-anytime |
 | Worry that third-party tools upload your keys and artwork | Listens on `127.0.0.1` only; keys and images never leave your machine; the settings API never returns full keys to the browser |
 
 ### Highlights
@@ -68,7 +68,7 @@ First run: click ⚙ Settings → “＋ Add provider” → paste the base URL 
 Basic flow:
 
 1. Pick or type a model — Shiguang auto-detects its capabilities and shows the matching parameters.
-2. Write prompts; **one per line and multiple lines become a batch** (up to 20, cancellable).
+2. Write the prompt: **the whole text is the prompt for this image** — multiple paragraphs are never split apart. Pick 1–4 under “count” to get several images from it.
 3. For image-to-image, click “＋ Reference” and choose / drop / paste up to 4 PNG / JPEG / WEBP images.
 4. “Generate” or `Ctrl + Enter`. Results are saved to `outputs/` and appear on the history wall.
 
@@ -139,24 +139,41 @@ Model-family detection covers `gpt-image`, `dall-e`, `nano-banana / banana`, `ge
 - `runtime_state.json` — runtime state such as health records; created automatically, safe to delete.
 - These and `config.json` are all in `.gitignore`.
 
-## 🎛 v1.0.3 feature list
+## 🎛 v1.2.0 feature list
 
 | Feature | Details |
 |---|---|
-| **Capability auto-adaptation** | Sizes, quality, background, style, count and reference-image entry adapt per model family; unsupported fields are filtered before sending to avoid upstream 400s. |
+| **Capability auto-adaptation** | Sizes, quality, background, style, count and reference-image entry adapt per model family; unsupported fields are filtered before sending to avoid upstream 400s. A "what will be sent" panel lists the parameters that actually go out. |
+| **A count that really works** | Official `gpt-image` / `gemini image` / `grok image` return exactly one image per call, so extra images are requested sequentially until the chosen count is met; families that do accept `n` (`dall-e` / `seedream` / `flux`) are asked for the whole batch first and topped up only if short. Shortfalls are reported honestly, and a failed top-up keeps the images already produced. |
 | **Multi-reference image-to-image** | Up to 4 PNG / JPEG / WEBP images; single reference uses the `image` field, multiple use `image[]` per the official convention. |
-| **Multi-line batch queue** | One prompt per line, executed sequentially; live progress on the wall; cancel takes effect before the next prompt and never interrupts an in-flight upstream request (no double billing). |
+| **Whole prompt = one image** | Everything in the prompt box (multiple paragraphs and newlines included) is sent verbatim as a single prompt; nothing is split by line or blank line. Use the count control to get more images. Progress shows live on the wall and cancel takes effect before the next upstream request. |
+| **14 aspect ratios** | 1:1 / 5:4 / 4:3 / 3:2 / 16:9 / 2:1 / 21:9 / 3:1 / 4:5 / 3:4 / 2:3 / 9:16 / 1:2 / 9:21, grouped as square / landscape / portrait / wide / tall. Each tile draws the real ratio and prints the pixel size; official sizes carry a filled dot. Custom width×height still passes through untouched. |
+| **Automatic size fallback** | If the relay only accepts its official sizes (400/422), the request is retried once at the family's official size instead of wasting the attempt, and the metadata records both the requested and the actual size. |
+| **Traceable, reusable parameters** | Quality / background / style / size / count / references are written into the sidecar JSON, shown in the lightbox, and restorable with one click via “reuse all parameters”. |
 | **Favorites & batch management** | Star favorites, favorites-only filter, lightbox favorite toggle; checkbox batch delete; one-click JSON export of all metadata. |
-| **Provider health checks** | Async `GET /v1/models` probes (never generates, so no cost), showing healthy / slow / rate-limited / unavailable plus latency, cached for 45s. |
-| **Safe failover** | Only on 429 / 502 / 503 / 504 or a clear connection failure, one retry against a backup that caches the same model; never on 400 / 401 / 403 or ambiguous timeouts. |
+| **Provider health checks** | Async `GET /v1/models` probes (never generates, so no cost), showing healthy / slow / rate-limited / unavailable plus latency, cached for 45s and probed in parallel across providers; generation time is no longer mixed into the health latency. |
+| **Upstream errors, translated** | Generation failures now append the concrete reason returned by the relay (the `error.message` and friends), instead of a bare HTTP status code. |
+| **Safe failover** | Only on 401 / 403 / 404 / 429 / 502 / 503 / 504 or a clear connection failure, one retry against a backup that caches the same model; never on ambiguous timeouts, and never mid-batch, so one group of images keeps a consistent look. |
 | **Local history & three themes** | Masonry wall, filters, pagination, lightbox, developing animation; an in-memory index keeps it fast with thousands of images. |
 
-<details><summary><b>Changes since v1.0.2</b></summary>
+<details><summary><b>Changes since v1.1.0</b></summary>
 
-- **Generation UX** — multi-line batch queue (progress, cancel, per-line failures don't abort the batch); reference images 1 → 4.
-- **History wall** — favorites / favorites-only filter, batch delete, metadata export; atomic sidecar writes.
-- **Visual upgrade** — all three themes rebuilt with a gallery feel: hairline borders, glass pill controls, film grain, gradient titles, dimensional primary button, SVG gear, crop marks on the developing paper.
-- **Hardening** — atomic `config.json` writes with a lock; health / model cache separated into `runtime_state.json`; per-provider model cache; in-memory history index.
+- **Grok family detection fixed** — real ids like `grok-2-image` normalize to "grok 2 image", which never contained the old "grok image" matcher, so they fell through to the generic profile and sent `size`, which the official xAI API rejects with 400. The matcher is now the bare keyword "grok", and the size field is omitted entirely for that family.
+- **Size field filtered by capability** — families with `size_mode = none` no longer carry a stale size on either end, matching the UI hint "this family does not accept a size".
+- **Errors carry the reason** — 401/429/400 and friends now append the relay's own JSON reason (first 160 chars), so "insufficient quota" or "model not found" is visible at a glance.
+- **Parallel health checks** — multiple providers are probed concurrently (backend and frontend), so one hanging relay no longer stalls the rest.
+- **TLS warnings never lost** — the certificate-downgrade notice now flows through sync generation, the task queue and error responses, surfaced as a toast.
+- **Wider model discovery** — the `/v1/models` keyword filter now also catches stable-diffusion / sd / cogview / wan / kolors / janus / ideogram / recraft families.
+- **Details** — reference thumbnail objectURLs are revoked after use (long-session memory leak); the `/` search shortcut no longer fires while the lightbox or settings dialog is open; the favorites filter button keeps its icon markup.
+</details>
+
+<details><summary><b>Changes since v1.0.3</b></summary>
+
+- **"I picked a count but still got one image" is fixed** — the count is now its own segmented control, and the backend tops up to the requested number.
+- **No more guessing at parameters** — the new "what will be sent" panel spells out model / size / quality / background / style / count / mode and which fields the family ignores.
+- **Health no longer lies** — generation time is no longer recorded as health latency (it used to read "healthy 42706ms").
+- **Steadier tasks** — a stale task id now ends cleanly instead of leaving the button stuck on "cancel"; single-prompt multi-image and multi-paragraph batches share one pollable, cancellable queue.
+- **Details** — the last used model is remembered, settings show the version and limits, the empty state is no longer removed for good, and the lightbox lists reference-image sources.
 </details>
 
 ## 🖼 Reference images & history metadata
@@ -188,13 +205,13 @@ With failover enabled, a clear line-level failure on the active provider trigger
 
 ```text
 ai-image-studio/
-├── app.py              # single-file backend: API, capability detection, batch queue, health & failover
+├── app.py              # single-file backend: API, capability detection, generation queue, health & failover
 ├── requirements.txt    # Flask only
 ├── config.example.json # configuration template
 ├── README.md           # 中文文档
 ├── static/index.html   # page structure
 ├── static/style.css    # three gallery-grade themes
-├── static/app.js       # generation, batch queue, references, wall, favorites, lightbox, GSAP motion
+├── static/app.js       # generation, image count, references, wall, favorites, lightbox, GSAP motion
 ├── screenshots/        # README previews
 └── outputs/            # generated images + sidecar JSON (created at runtime)
 ```
@@ -233,4 +250,4 @@ Yes. Legacy single-provider `api_base` / `api_key` configs auto-migrate to the p
 
 ---
 
-MIT License · AI Image Studio · Shiguang · v1.0.3
+MIT License · AI Image Studio · Shiguang · v1.2.0

@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>拾光 · 生图</title>
+<title>拾光 · AI Image Studio</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@600;900&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Serif+SC:wght@600;700;900&family=Noto+Sans+SC:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="icon" type="image/x-icon" href="/static/assets/favicon.ico">
 <link rel="icon" type="image/png" sizes="64x64" href="/static/assets/favicon.png">
 <link rel="stylesheet" href="/static/style.css">
@@ -15,101 +15,300 @@
 
 <aside class="rail">
   <header class="brand">
-    <h1><span id="app-name">拾光</span><span class="lamp" aria-hidden="true"></span></h1>
-    <p class="tag">本地生图工作台</p>
-    <button id="open-settings" class="gear" title="设置" aria-label="设置">
-      <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <circle cx="12" cy="12" r="3.2"/>
-        <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34h.09a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87v.09a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1z"/>
-      </svg>
-    </button>
+    <div class="brand-top">
+      <div class="brand-title-wrap">
+        <div class="brand-logo-gem">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="12 2 2 7 12 12 22 7 12 2"/>
+            <polyline points="2 17 12 22 22 17"/>
+            <polyline points="2 12 12 17 22 12"/>
+          </svg>
+        </div>
+        <h1><span id="app-name">拾光</span><span class="lamp" aria-hidden="true"></span></h1>
+        <span class="brand-pill">STUDIO 2.0</span>
+      </div>
+
+      <div class="brand-actions">
+        <!-- 顶部快捷主题切换胶囊 -->
+        <div class="quick-themes" role="radiogroup" aria-label="快捷切换色彩主题">
+          <button class="theme-btn quick-theme-dot" data-theme="darkroom" title="暮金 · 暗房琥珀黑金" aria-label="暮金主题"></button>
+          <button class="theme-btn quick-theme-dot" data-theme="ink" title="黛夜 · 幽邃深蓝冷月" aria-label="黛夜主题"></button>
+          <button class="theme-btn quick-theme-dot" data-theme="paper" title="宣纸 · 典雅素帛丹砂" aria-label="宣纸主题"></button>
+        </div>
+
+        <button id="open-settings" class="gear" title="打开工作室设置" aria-label="设置">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="3.2"/>
+            <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34h.09a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87v.09a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1z"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+    <p class="tag">本地优先 · 聚合生图工作台与艺术画廊</p>
   </header>
 
-  <div class="field" id="need-api" hidden>
-    <p class="hint">还没有配置 API，点右上角 ⚙ 填写地址和密钥。</p>
-  </div>
-
-  <div class="field">
-    <label for="prompt">提示词 <span class="label-note">一行一条，多行即连拍</span></label>
-    <textarea id="prompt" placeholder="描述你想要的画面…" spellcheck="false"></textarea>
-    <div id="reference-box" class="reference-box">
-      <input id="reference-input" type="file" accept="image/png,image/jpeg,image/webp" multiple hidden>
-      <div id="reference-thumbs" class="reference-thumbs"></div>
-      <button id="reference-add" class="reference-add" type="button">＋ 参考图</button>
-      <span id="reference-note" class="label-note">拖入或粘贴图片，最多 4 张</span>
+  <!-- 当前网关与模型控制舱 -->
+  <div class="rail-status">
+    <div class="rs-row">
+      <div class="rs-beacon" aria-hidden="true">
+        <span class="rs-dot" id="rs-dot"></span>
+        <span class="rs-pulse"></span>
+      </div>
+      <div class="rs-info">
+        <span class="rs-provider" id="rail-provider">尚未连接中转站</span>
+        <span class="rs-ping" id="rs-ping" title="当前中转站状态">就绪</span>
+      </div>
+      <button id="rs-switch" class="mini-btn rs-switch-btn" type="button" title="打开设置，切换中转站或健康检测">
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="16 3 21 3 21 8"/>
+          <line x1="4" y1="20" x2="21" y2="3"/>
+          <polyline points="21 16 21 21 16 21"/>
+          <line x1="15" y1="15" x2="21" y2="21"/>
+          <line x1="4" y1="4" x2="9" y2="9"/>
+        </svg>
+        切换线路
+      </button>
     </div>
-  </div>
-
-  <div class="field" id="prompt-history-field" hidden>
-    <div class="ph-head">
-      <label>Prompt 历史 <span class="label-note">点击回填 · ✕ 删除单条</span></label>
-      <button id="ph-clear" class="ph-clear" type="button">清空</button>
-    </div>
-    <div id="prompt-history" class="chips"></div>
-  </div>
-
-  <div class="field">
-    <label for="model">模型 <span class="label-note">可输入筛选</span></label>
     <div class="combo" id="model-combo">
-      <input id="model" type="text" autocomplete="off" spellcheck="false" placeholder="加载中…">
-      <button class="combo-toggle" tabindex="-1" aria-label="展开模型列表">▾</button>
+      <div class="combo-input-wrap">
+        <svg class="combo-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="m9 12 2 2 4-4"/></svg>
+        <input id="model" type="text" autocomplete="off" spellcheck="false" placeholder="选择或搜索生图模型…">
+      </div>
+      <button class="combo-toggle" tabindex="-1" aria-label="展开模型列表">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+      </button>
       <div class="combo-list" id="model-list" hidden></div>
     </div>
   </div>
 
-  <div id="advanced-params" class="field advanced-params" hidden>
-    <label>参数 <span id="capability-label" class="label-note"></span></label>
-    <div class="param-grid">
-      <label id="quality-param">质量<select id="quality"><option value="">默认</option><option value="low">低</option><option value="medium">中</option><option value="high">高</option></select></label>
-      <label id="background-param">背景<select id="background"><option value="">默认</option><option value="auto">自动</option><option value="transparent">透明</option><option value="opaque">不透明</option></select></label>
-      <label id="style-param">风格<select id="style"><option value="">默认</option><option value="vivid">鲜明</option><option value="natural">自然</option></select></label>
-      <label id="n-param">数量<select id="n"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select></label>
+  <div class="field" id="need-api" hidden>
+    <div class="hint-card">
+      <span class="hint-icon">⚡</span>
+      <div class="hint-content">
+        <strong>尚未配置生图 API</strong>
+        <p>点击右上角 ⚙ 设置填写中转站地址与密钥，即可开启 AI 灵感创作。</p>
+      </div>
     </div>
   </div>
 
-  <div class="field" id="size-field">
-    <label id="size-label">画幅 <span id="size-hint" class="size-hint"></span></label>
-    <div class="sizes" role="radiogroup" aria-labelledby="size-label">
-      <button class="size on" data-size="1024x1024" role="radio" aria-checked="true">方</button>
-      <button class="size" data-size="1536x1024" role="radio" aria-checked="false">横</button>
-      <button class="size" data-size="1024x1536" role="radio" aria-checked="false">竖</button>
-      <button class="size" data-size="1792x1024" role="radio" aria-checked="false">宽幅</button>
-      <button class="size" data-size="1024x1792" role="radio" aria-checked="false">长幅</button>
-      <input id="size-custom" class="size-custom" type="text" placeholder="自定义…" autocomplete="off"
-             title="任意宽高，如 768x1344，原样发给中转站" aria-label="自定义画幅">
+  <!-- 1 提示词工坊：整段文字 = 一张图，多张由下面的「数量」决定 -->
+  <section class="step">
+    <div class="step-head">
+      <div class="step-no-badge">
+        <span class="step-no">01</span>
+      </div>
+      <span class="step-title">提示词工坊</span>
+      <span class="step-meta" id="prompt-meta">0 字</span>
+      <div class="prompt-tools">
+        <button id="prompt-dice" class="mini-tool-btn" type="button" title="灵感骰子 · 随机注入艺术构思">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><path d="M12 8v.01"/><path d="M8 12v.01"/><path d="M16 12v.01"/><path d="M12 16v.01"/></svg>
+          <span>灵感</span>
+        </button>
+        <button id="prompt-magic" class="mini-tool-btn" type="button" title="风格修饰 · 快速追加艺术标签">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/></svg>
+          <span>修饰</span>
+        </button>
+        <button id="prompt-clear" class="mini-btn prompt-clear-btn" type="button" title="清空提示词">清空</button>
+      </div>
     </div>
-  </div>
 
-  <button id="go" class="go">开始生成<kbd>Ctrl ↵</kbd></button>
-  <p id="msg" class="msg" role="alert"></p>
+    <!-- 风格修饰标签浮动抽屉 (默认折叠) -->
+    <div id="magic-tags-bar" class="magic-tags-bar" hidden>
+      <div class="mt-group">
+        <span class="mt-label">质感</span>
+        <button type="button" class="mt-tag" data-tag="8K超精细分辨率，大师级杰作，锐利细节">8K杰作</button>
+        <button type="button" class="mt-tag" data-tag="哈苏中画幅相机拍摄，电影级光影质感，自然胶片颗粒">电影胶片</button>
+        <button type="button" class="mt-tag" data-tag="虚幻引擎5渲染，光线追踪，高精度3D质感">虚幻5渲染</button>
+      </div>
+      <div class="mt-group">
+        <span class="mt-label">艺术</span>
+        <button type="button" class="mt-tag" data-tag="中国传统水墨画意境，留白写意，宣纸晕染">水墨写意</button>
+        <button type="button" class="mt-tag" data-tag="新海诚/吉卜力唯美动画风格，澄澈天空，明亮温馨">唯美日漫</button>
+        <button type="button" class="mt-tag" data-tag="赛博朋克未来主义，霓虹夜色，雨夜反光倒影">赛博朋克</button>
+        <button type="button" class="mt-tag" data-tag="极简主义构图，纯净背景，优雅负空间">极简雅致</button>
+      </div>
+    </div>
+
+    <div class="prompt-box-wrap">
+      <textarea id="prompt" placeholder="描述你构想的艺术画面，支持中英文、长段落，整段即为一张完整图的生成指令… (按 Ctrl+Enter 快速起炉)" spellcheck="false"></textarea>
+      <div class="prompt-floating-hint">
+        <kbd>Ctrl ↵ 快速生成</kbd>
+      </div>
+    </div>
+
+    <!-- 图生图参考面板 -->
+    <div id="reference-box" class="reference-box">
+      <input id="reference-input" type="file" accept="image/png,image/jpeg,image/webp" multiple hidden>
+      <div id="reference-thumbs" class="reference-thumbs"></div>
+      <button id="reference-add" class="reference-drop" type="button">
+        <span class="rd-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+        </span>
+        <span class="rd-text">参考图 · 图生图</span>
+        <span id="reference-note" class="rd-note">点击选择 / 拖拽 / 剪贴板粘贴</span>
+      </button>
+    </div>
+
+    <div class="field prompt-history" id="prompt-history-field" hidden>
+      <div class="ph-head">
+        <label><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 14 14"/></svg> 灵感历史库 <span class="label-note">点击回填</span></label>
+        <button id="ph-clear" class="ph-clear" type="button">清空历史</button>
+      </div>
+      <div id="prompt-history" class="chips"></div>
+    </div>
+  </section>
+
+  <!-- 2 画面参数：画幅 / 数量 / 高级参数 -->
+  <section class="step">
+    <div class="step-head">
+      <div class="step-no-badge">
+        <span class="step-no">02</span>
+      </div>
+      <span class="step-title">画面参数</span>
+      <span class="step-meta" id="capability-label"></span>
+    </div>
+
+    <div class="sub-field" id="size-field">
+      <div class="sub-head">
+        <span class="sub-title">画幅比例</span>
+        <span id="size-hint" class="size-hint"></span>
+      </div>
+      <div class="ratio-filter" id="ratio-groups" role="tablist" aria-label="画幅分类"></div>
+      <div class="ratios" id="ratio-group" role="radiogroup" aria-label="画幅"></div>
+      <div class="size-custom-wrap">
+        <div class="size-custom-icon">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+        </div>
+        <input id="size-custom" class="size-custom" type="text" placeholder="自定义画幅，如 768x1344 (宽x高)" autocomplete="off"
+               title="任意宽高，原样发给中转站；中转站不认时会自动退到官方尺寸" aria-label="自定义画幅">
+      </div>
+    </div>
+
+    <div class="sub-field" id="n-param">
+      <div class="sub-head">
+        <span class="sub-title">生成张数</span>
+        <span class="label-note" id="n-hint">并发批次出图</span>
+      </div>
+      <div class="n-group" id="n-group" role="radiogroup" aria-label="生成数量"></div>
+      <input id="n" type="hidden" value="1">
+    </div>
+
+    <details class="adv" id="advanced-params">
+      <summary>
+        <span class="adv-label">
+          <svg class="adv-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          高级参数调优
+        </span>
+        <span id="adv-summary" class="label-note"></span>
+      </summary>
+      <div class="param-grid">
+        <label id="quality-param">
+          <span>画质</span>
+          <select id="quality"><option value="">默认</option><option value="low">低</option><option value="medium">中</option><option value="high">高</option></select>
+        </label>
+        <label id="background-param">
+          <span>背景</span>
+          <select id="background"><option value="">默认</option><option value="auto">自动</option><option value="transparent">透明</option><option value="opaque">不透明</option></select>
+        </label>
+        <label id="style-param">
+          <span>风格</span>
+          <select id="style"><option value="">默认</option><option value="vivid">鲜明</option><option value="natural">自然</option></select>
+        </label>
+      </div>
+      <p id="param-note" class="param-note"></p>
+    </details>
+  </section>
+
+  <!-- 3 开始生成控制舱 (Sticky Masterpiece Deck) -->
+  <section class="gen-foot">
+    <button id="go" class="go">
+      <span class="go-spark" aria-hidden="true">✦</span>
+      <span class="go-text">开始生成</span>
+      <kbd class="go-kbd">Ctrl ↵</kbd>
+    </button>
+    <div id="progress" class="progress" hidden>
+      <div id="progress-track" class="progress-track"><i id="progress-fill"></i></div>
+      <span id="progress-text" class="progress-text"></span>
+    </div>
+    <div id="req-preview" class="req-preview" hidden></div>
+    <p id="msg" class="msg" role="alert"></p>
+  </section>
 </aside>
 
 <main class="wall">
+  <!-- 顶部悬浮控制坞 (Studio Command Dock) -->
   <div class="filters" id="filters">
-    <input id="f-q" type="text" placeholder="搜索提示词…" spellcheck="false">
-    <select id="f-model"><option value="">全部模型</option></select>
-    <select id="f-provider"><option value="">全部来源</option></select>
-    <select id="f-range">
-      <option value="all">全部时间</option>
-      <option value="today">今天</option>
-      <option value="week">最近7天</option>
-    </select>
-    <select id="f-sort">
-      <option value="newest">最新生成</option>
-      <option value="fastest">最快生成</option>
-      <option value="model">模型名称</option>
-    </select>
-    <span class="filter-actions">
-      <button id="f-fav" class="filter-toggle" type="button" aria-pressed="false" title="只显示收藏的照片">☆ 收藏</button>
-      <button id="f-batch" class="filter-toggle" type="button" aria-pressed="false" title="勾选多张，可批量删除">批量管理</button>
-      <a id="f-export" href="/api/history/export" class="filter-toggle" title="导出全部元数据（不含图片本体）" download>导出</a>
-    </span>
+    <div class="filter-search-wrap">
+      <svg class="search-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+      <input id="f-q" type="text" placeholder="搜索提示词… (按 / 聚焦)" spellcheck="false">
+      <button id="search-clear-btn" class="search-clear-btn" type="button" aria-label="清除搜索" hidden>×</button>
+      <kbd class="search-kbd">/</kbd>
+    </div>
+
+    <div class="filter-select-group">
+      <select id="f-model" title="按模型过滤"><option value="">全部模型</option></select>
+      <select id="f-provider" title="按线路过滤"><option value="">全部来源</option></select>
+      <select id="f-range" title="时间范围">
+        <option value="all">全部时间</option>
+        <option value="today">今天</option>
+        <option value="week">最近7天</option>
+      </select>
+      <select id="f-sort" title="排序规则">
+        <option value="newest">最新生成</option>
+        <option value="fastest">最快生成</option>
+        <option value="model">模型名称</option>
+      </select>
+    </div>
+
+    <!-- 视图模式切换器 (瀑布流 / 对称网格 / 沉浸巨幕) -->
+    <div class="view-mode-tabs" role="radiogroup" aria-label="画廊视图布局">
+      <button class="view-btn on" id="view-masonry" data-mode="masonry" type="button" title="瀑布流布局 · 原比例自然排列">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="10" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
+      </button>
+      <button class="view-btn" id="view-grid" data-mode="grid" type="button" title="网格布局 · 均衡对称矩阵">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg>
+      </button>
+      <button class="view-btn" id="view-cinema" data-mode="cinema" type="button" title="巨幕画廊 · 放大沉浸检视">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/></svg>
+      </button>
+    </div>
+
+    <div class="filter-actions">
+      <button id="f-fav" class="filter-toggle" type="button" aria-pressed="false" title="只显示已收藏的艺术照片">
+        <span class="ft-star">★</span> 收藏
+      </button>
+      <button id="f-batch" class="filter-toggle" type="button" aria-pressed="false" title="多选批量管理照片">批量管理</button>
+      <a id="f-export" href="/api/history/export" class="filter-toggle export-toggle" title="导出全部元数据 JSON" download>
+        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        导出
+      </a>
+      <span id="wall-count" class="wall-count-pill" title="画廊作品总计">—</span>
+    </div>
   </div>
+
   <div id="gallery" class="masonry"></div>
+
+  <!-- 空态提示：提供即点即试的启发词 -->
   <div id="empty" class="empty">
-    <div class="empty-mark">◌</div>
-    <p>还没有照片。写一句提示词，按下开始。</p>
+    <div class="empty-mark">
+      <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+        <rect width="18" height="18" x="3" y="3" rx="2" ry="2"/>
+        <circle cx="9" cy="9" r="2"/>
+        <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>
+      </svg>
+    </div>
+    <p class="empty-title">画廊虚位以待 · 灵感即将显影</p>
+    <p class="empty-desc">在左侧构思画面并按下「开始生成」，你的每一件 AI 艺术作品都将在此陈列与追溯。</p>
+    <div class="empty-starters">
+      <span class="es-head">试试这些灵感微构思：</span>
+      <div class="es-pills">
+        <button type="button" class="es-pill" data-prompt="电影级光影特写，古典雨夜咖啡馆橱窗倒影，暖黄琥珀光晕与清冷夜色交织，哈苏中画幅，8K超精细">☕ 雨夜咖啡馆倒影</button>
+        <button type="button" class="es-pill" data-prompt="悬浮在宇宙星云之中的东方仙山楼阁，古典飞檐斗拱，紫金星河倾泻，水墨写意融合科幻光影">🌌 星海仙山楼阁</button>
+        <button type="button" class="es-pill" data-prompt="赛博朋克深海机械鲸鱼，发光生物霓虹纹理，微光珊瑚礁，深蓝海沟光束，虚幻引擎5渲染">🐋 霓虹机械深海巨鲸</button>
+      </div>
+    </div>
   </div>
+
   <nav id="pager" class="pager" hidden>
     <span id="pg-info" class="pg-info"></span>
     <span id="pg-controls" class="pg-controls">
@@ -124,41 +323,70 @@
       </span>
     </span>
   </nav>
+
+  <!-- 底部浮动批量操作坞 -->
   <div id="batch-bar" class="batch-bar" hidden>
-    <span id="batch-count" class="batch-count">已选 0 张</span>
-    <button id="batch-all" class="ghost" type="button">全选本页</button>
-    <button id="batch-del" class="ghost batch-del" type="button">删除所选</button>
-    <button id="batch-exit" class="ghost" type="button">退出</button>
+    <div class="batch-left">
+      <span class="batch-badge">BATCH</span>
+      <span id="batch-count" class="batch-count">已选 0 张</span>
+    </div>
+    <div class="batch-btns">
+      <button id="batch-all" class="ghost" type="button">全选本页</button>
+      <button id="batch-del" class="ghost batch-del" type="button">删除所选</button>
+      <button id="batch-exit" class="ghost" type="button">退出管理</button>
+    </div>
   </div>
 </main>
 
-<!-- 灯箱：滚轮/按钮缩放、拖拽平移、双击缩放 -->
+<!-- 灯箱巨幕检视台：滚轮/按钮缩放、拖拽平移、双击缩放、取色板、参数复用 -->
 <div id="lightbox" class="lightbox" hidden>
 <figure class="frame">
   <div class="lb-body">
     <div class="stage">
       <img id="lb-img" alt="" draggable="false">
-      <button id="lb-prev" class="lb-nav" aria-label="上一张">‹</button>
-      <button id="lb-next" class="lb-nav" aria-label="下一张">›</button>
+      <button id="lb-prev" class="lb-nav" aria-label="上一张 (按左方向键)">‹</button>
+      <button id="lb-next" class="lb-nav" aria-label="下一张 (按右方向键)">›</button>
     </div>
     <aside class="lb-info">
-      <h3>生成信息</h3>
+      <div class="lb-info-header">
+        <div class="lb-info-title-wrap">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+          <h3>生成档案 · METADATA</h3>
+        </div>
+      </div>
       <dl class="lb-facts">
         <dt>模型</dt><dd id="lb-model">—</dd>
         <dt>API 来源</dt><dd id="lb-provider">—</dd>
         <dt>生成时间</dt><dd id="lb-time">—</dd>
-        <dt>耗时</dt><dd id="lb-elapsed">—</dd>
-        <dt>尺寸</dt><dd id="lb-size">—</dd>
-        <dt>模式</dt><dd id="lb-mode">—</dd>
-        <dt>线路</dt><dd id="lb-route">—</dd>
+        <dt>出图耗时</dt><dd id="lb-elapsed">—</dd>
+        <dt>分辨率</dt><dd id="lb-size">—</dd>
+        <dt>高级参数</dt><dd id="lb-params">—</dd>
+        <dt>生成模式</dt><dd id="lb-mode">—</dd>
+        <dt>参考图片</dt><dd id="lb-refs">—</dd>
+        <dt>调度线路</dt><dd id="lb-route">—</dd>
       </dl>
-      <h3>Prompt</h3>
+
+      <!-- 画面主色调萃取 -->
+      <div class="lb-palette-wrap">
+        <div class="lb-palette-head">
+          <span>萃取主色调 (点击复制色值)</span>
+        </div>
+        <div id="lb-palette" class="lb-palette"></div>
+      </div>
+
+      <div class="lb-prompt-header">
+        <div class="lb-info-title-wrap">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          <h3>提示词 · PROMPT</h3>
+        </div>
+      </div>
       <p id="lb-prompt" class="lb-prompt">—</p>
+
       <div class="lb-info-actions">
-        <button id="lb-copy" class="zoom-btn wide">复制 Prompt</button>
-        <button id="lb-reuse" class="zoom-btn wide">重新使用</button>
+        <button id="lb-copy" class="zoom-btn wide primary-action">复制 Prompt</button>
+        <button id="lb-reuse" class="zoom-btn wide">复用全部参数</button>
         <button id="lb-fav" class="zoom-btn wide">☆ 收藏</button>
-        <button id="lb-del" class="danger">删除</button>
+        <button id="lb-del" class="danger">删除照片</button>
       </div>
     </aside>
   </div>
@@ -167,69 +395,123 @@
       <button class="zoom-btn" id="zoom-out" aria-label="缩小">−</button>
       <span id="zoom-level">100%</span>
       <button class="zoom-btn" id="zoom-in" aria-label="放大">+</button>
-      <button class="zoom-btn wide" id="zoom-reset">适应</button>
+      <button class="zoom-btn wide" id="zoom-reset">适应窗口</button>
     </span>
-    <span id="lb-name"></span>
+    <span id="lb-name" class="lb-filename"></span>
     <span class="bar-actions">
-      <a id="lb-dl" download>下载原图</a>
-      <button id="lb-close">关闭</button>
+      <a id="lb-dl" class="lb-download-btn" download>下载原图</a>
+      <button id="lb-close" class="lb-close-btn">关闭 (Esc)</button>
     </span>
   </figcaption>
 </figure>
 </div>
 
-<!-- 设置 -->
+<!-- 工作室设置中心 -->
 <div id="settings" class="lightbox" hidden>
   <div class="frame settings-frame">
-    <h2>设置</h2>
+    <div class="settings-head">
+      <div class="sh-left">
+        <h2>工作室设置</h2>
+        <p class="settings-subtitle">管理本地工作台参数、中转站集群与视觉色彩主题</p>
+      </div>
+      <button id="set-close" class="set-close" aria-label="关闭设置">✕</button>
+    </div>
 
     <div class="set-field">
-      <label for="set-name">名称</label>
+      <label for="set-name">工作台名称</label>
       <div class="name-row">
-        <input id="set-name" type="text" maxlength="12">
-        <button id="name-save" class="ghost">保存</button>
+        <input id="set-name" type="text" maxlength="12" placeholder="拾光">
+        <button id="name-save" class="ghost solid">保存</button>
       </div>
     </div>
 
     <div class="set-field">
-      <label id="theme-label">主题 <span class="label-note">点击即换，自动保存</span></label>
+      <label id="theme-label">色彩主题 <span class="label-note">实时生效并持久保存</span></label>
       <div class="sizes themes" role="radiogroup" aria-labelledby="theme-label">
-        <button class="size theme-btn" data-theme="darkroom">暮金</button>
-        <button class="size theme-btn" data-theme="ink">黛夜</button>
-        <button class="size theme-btn" data-theme="paper">宣纸</button>
+        <button class="size theme-btn" data-theme="darkroom" title="暮金 · 暗房琥珀黑金">
+          <span class="theme-swatch">
+            <i class="sw-bg" style="background:#0d0b09"></i>
+            <i class="sw-ac" style="background:#e6a752"></i>
+          </span>
+          <span class="theme-name">暮金</span>
+          <span class="theme-desc">暗房黑曜 · 流动金珀</span>
+        </button>
+        <button class="size theme-btn" data-theme="ink" title="黛夜 · 幽邃深蓝冷月">
+          <span class="theme-swatch">
+            <i class="sw-bg" style="background:#080b13"></i>
+            <i class="sw-ac" style="background:#8ca5ff"></i>
+          </span>
+          <span class="theme-name">黛夜</span>
+          <span class="theme-desc">幽邃蓝墨 · 钛青冷月</span>
+        </button>
+        <button class="size theme-btn" data-theme="paper" title="宣纸 · 典雅素帛丹砂">
+          <span class="theme-swatch">
+            <i class="sw-bg" style="background:#f5efe4"></i>
+            <i class="sw-ac" style="background:#bf3f2a"></i>
+          </span>
+          <span class="theme-name">宣纸</span>
+          <span class="theme-desc">典雅素宣 · 丹砂朱印</span>
+        </button>
       </div>
     </div>
 
     <div class="set-field">
-      <label>API 中转站 <span class="label-note">点击「使用」切换，模型列表自动刷新</span></label>
+      <div class="set-subhead">
+        <label>API 中转站集群 <span class="label-note">多线路聚合调度与健康监测</span></label>
+      </div>
       <div id="provider-list" class="provider-list"></div>
-      <button id="provider-add" class="ghost prov-add">＋ 添加新的中转站</button>
+
+      <!-- 快速添加常用中转站模版 -->
+      <div class="provider-presets">
+        <span class="pp-title">常用模版快捷填入：</span>
+        <div class="pp-btns">
+          <button type="button" class="pp-btn" data-preset="siliconflow">+ 硅基流动 SiliconFlow</button>
+          <button type="button" class="pp-btn" data-preset="openai">+ 官方 OpenAI</button>
+          <button type="button" class="pp-btn" data-preset="openrouter">+ OpenRouter</button>
+        </div>
+      </div>
+
+      <button id="provider-add" class="ghost prov-add">＋ 添加新的中转站线路</button>
     </div>
 
     <div class="set-field failover-setting">
-      <label for="failover-toggle">线路容错</label>
-      <label class="toggle-row"><input id="failover-toggle" type="checkbox"><span>生成失败时尝试备用中转站</span></label>
-      <p class="label-note">仅在 429 / 502 / 503 / 504 或明确连接失败时切换一次；默认关闭。</p>
-      <button id="health-refresh" class="ghost" type="button">重新检测</button>
+      <div class="set-toggle-card">
+        <div class="st-text">
+          <span class="st-title">线路智能容错 Failover</span>
+          <span class="label-note">在 429 限流或 502/503 宕机时自动切换备用中转站</span>
+        </div>
+        <label class="switch-ui"><input id="failover-toggle" type="checkbox"><span class="switch-slider"></span></label>
+      </div>
+      <div class="st-footer">
+        <button id="health-refresh" class="mini-btn" type="button">重新检测线路健康</button>
+      </div>
     </div>
 
     <div id="provider-form" hidden>
-      <div class="set-field">
-        <label for="pf-name">中转站名称</label>
-        <input id="pf-name" type="text" maxlength="20" placeholder="如：官方中转">
-      </div>
-      <div class="set-field">
-        <label for="pf-base">API 地址</label>
-        <input id="pf-base" type="text" spellcheck="false" placeholder="https://…">
-      </div>
-      <div class="set-field">
-        <label for="pf-key">API 密钥</label>
-        <input id="pf-key" type="password" spellcheck="false" autocomplete="off" placeholder="sk-…">
-      </div>
-      <div class="set-actions">
-        <button id="pf-save" class="ghost solid">保存中转站</button>
-        <button id="pf-test" class="ghost">测试连接</button>
-        <button id="pf-cancel" class="ghost">取消</button>
+      <div class="provider-form-inner">
+        <div class="pf-head">
+          <strong id="pf-title">配置中转站线路</strong>
+        </div>
+        <div class="set-field">
+          <label for="pf-name">中转站名称</label>
+          <input id="pf-name" type="text" maxlength="20" placeholder="如：官方线路 / 硅基流动 / 备用站">
+        </div>
+        <div class="set-field">
+          <label for="pf-base">API 地址 (Base URL)</label>
+          <input id="pf-base" type="text" spellcheck="false" placeholder="https://api.openai.com/v1 或中转站地址">
+        </div>
+        <div class="set-field">
+          <label for="pf-key">API 密钥 (API Key)</label>
+          <div class="key-input-wrap">
+            <input id="pf-key" type="password" spellcheck="false" autocomplete="off" placeholder="sk-… (留空保持现有密钥)">
+            <button id="pf-key-eye" class="key-eye-btn" type="button" title="显示/隐藏密钥">👁</button>
+          </div>
+        </div>
+        <div class="set-actions">
+          <button id="pf-save" class="ghost solid">保存线路</button>
+          <button id="pf-test" class="ghost">测试连通性</button>
+          <button id="pf-cancel" class="ghost">取消</button>
+        </div>
       </div>
     </div>
 
@@ -237,9 +519,15 @@
       <span id="set-msg" class="set-msg"></span>
     </div>
 
-    <button id="set-close" class="set-close" aria-label="关闭设置">✕</button>
+    <p class="set-foot">
+      <span id="set-version">拾光 · Studio</span>
+      <span id="set-limits" class="label-note"></span>
+    </p>
   </div>
 </div>
+
+<!-- 轻量 Toast 浮动通知容器 -->
+<div id="toast-container" class="toast-container" aria-live="polite"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
 <script src="/static/app.js"></script>

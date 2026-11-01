@@ -17,76 +17,117 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from flask import Flask, Response, jsonify, request, send_from_directory
 
-APP_VERSION = "1.0.3"
+APP_VERSION = "1.2.0"
 APP_AUTHOR = "lmz-666-lmz"
+
+SIZE_3_2 = ["1024x1024", "1536x1024", "1024x1536"]
+
+# 通用画幅库：中转站（new-api 系）基本都按 WxH 原样透传，尺寸统一取 16 的整数倍，
+# 避免部分上游对宽高对齐敏感。size_mode=free 的模型族会全量展示这套比例；
+# size_mode=fixed 的（如官方 DALL-E）只给 supported_sizes 里的官方尺寸。
+SIZE_LIBRARY = [
+    {"size": "1024x1024", "ratio": "1:1", "group": "方"},
+    {"size": "1280x1024", "ratio": "5:4", "group": "横"},
+    {"size": "1344x1008", "ratio": "4:3", "group": "横"},
+    {"size": "1536x1024", "ratio": "3:2", "group": "横"},
+    {"size": "1536x864", "ratio": "16:9", "group": "横"},
+    {"size": "1536x768", "ratio": "2:1", "group": "宽幅"},
+    {"size": "1680x720", "ratio": "21:9", "group": "宽幅"},
+    {"size": "1536x512", "ratio": "3:1", "group": "宽幅"},
+    {"size": "1024x1280", "ratio": "4:5", "group": "竖"},
+    {"size": "1008x1344", "ratio": "3:4", "group": "竖"},
+    {"size": "1024x1536", "ratio": "2:3", "group": "竖"},
+    {"size": "864x1536", "ratio": "9:16", "group": "竖"},
+    {"size": "768x1536", "ratio": "1:2", "group": "长幅"},
+    {"size": "720x1680", "ratio": "9:21", "group": "长幅"},
+]
+SIZE_GROUPS = ["方", "横", "竖", "宽幅", "长幅"]
 
 # One source of truth for the parameter contract used by the UI and the
 # upstream request filter.  Unknown models intentionally use the generic
 # compatible profile instead of being rejected.
+#
+# n_mode 决定「数量」怎么实现：
+#   upstream = 该模型族支持一次多图，把 n 发给中转站，返回不足时本地补齐
+#   local    = 官方接口只出 1 张（如 gpt-image / gemini / grok），不发送 n，改为分次请求
+# 两种模式都会补齐到用户选定的张数，界面上的「数量」因此始终有效。
 MODEL_CAPABILITIES = {
     "gpt-image": {
         "family": "GPT Image", "text_to_image": True, "image_to_image": True,
-        "supported_sizes": ["1024x1024", "1536x1024", "1024x1536"],
-        "quality": True, "background": True, "style": False, "n": True,
+        "supported_sizes": SIZE_3_2, "size_mode": "free",
+        "quality": True, "background": True, "style": False, "n": True, "n_mode": "local",
         "quality_values": ["low", "medium", "high"], "background_values": ["auto", "transparent", "opaque"],
+        "notes": "官方 gpt-image 每次只返回 1 张，选择多张时会自动分次请求",
     },
     "dall-e": {
         "family": "DALL-E", "text_to_image": True, "image_to_image": False,
-        "supported_sizes": ["1024x1024", "1792x1024", "1024x1792"],
-        "quality": True, "background": False, "style": True, "n": True,
+        "supported_sizes": ["1024x1024", "1792x1024", "1024x1792"], "size_mode": "fixed",
+        "quality": True, "background": False, "style": True, "n": True, "n_mode": "upstream",
         "quality_values": ["standard", "hd"], "style_values": ["vivid", "natural"],
+        "notes": "DALL-E 支持一次请求多张（n=1-4）；不支持参考图",
     },
     "nano-banana": {
         "family": "Nano Banana", "text_to_image": True, "image_to_image": True,
-        "supported_sizes": ["1024x1024", "1536x1024", "1024x1536"],
-        "quality": False, "background": False, "style": False, "n": True,
+        "supported_sizes": SIZE_3_2, "size_mode": "free",
+        "quality": False, "background": False, "style": False, "n": True, "n_mode": "local",
+        "notes": "只接收提示词与画幅，多张自动分次请求",
     },
     "banana": {
         "family": "Nano Banana", "text_to_image": True, "image_to_image": True,
-        "supported_sizes": ["1024x1024", "1536x1024", "1024x1536"],
-        "quality": False, "background": False, "style": False, "n": True,
+        "supported_sizes": SIZE_3_2, "size_mode": "free",
+        "quality": False, "background": False, "style": False, "n": True, "n_mode": "local",
+        "notes": "只接收提示词与画幅，多张自动分次请求",
     },
     "gemini image": {
         "family": "Gemini Image", "text_to_image": True, "image_to_image": True,
-        "supported_sizes": ["1024x1024", "1536x1024", "1024x1536"],
-        "quality": False, "background": False, "style": False, "n": True,
+        "supported_sizes": SIZE_3_2, "size_mode": "free",
+        "quality": False, "background": False, "style": False, "n": True, "n_mode": "local",
+        "notes": "只接收提示词与画幅，多张自动分次请求",
     },
     "seedream": {
         "family": "Seedream", "text_to_image": True, "image_to_image": True,
-        "supported_sizes": ["1024x1024", "1536x1024", "1024x1536"],
-        "quality": False, "background": False, "style": False, "n": True,
+        "supported_sizes": SIZE_3_2, "size_mode": "free",
+        "quality": False, "background": False, "style": False, "n": True, "n_mode": "upstream",
+        "notes": "支持一次多图，返回不足时自动补齐",
     },
     "flux": {
         "family": "FLUX", "text_to_image": True, "image_to_image": True,
-        "supported_sizes": ["1024x1024", "1536x1024", "1024x1536"],
-        "quality": False, "background": False, "style": False, "n": True,
+        "supported_sizes": SIZE_3_2, "size_mode": "free",
+        "quality": False, "background": False, "style": False, "n": True, "n_mode": "upstream",
+        "notes": "支持一次多图，返回不足时自动补齐",
     },
     "grok image": {
         "family": "Grok Image", "text_to_image": True, "image_to_image": True,
         # xAI 官方图像接口不接受 size/quality/style；size 留空 = 不发送该字段
-        "supported_sizes": [],
-        "quality": False, "background": False, "style": False, "n": True,
+        "supported_sizes": [], "size_mode": "none",
+        "quality": False, "background": False, "style": False, "n": True, "n_mode": "local",
+        "notes": "官方接口只接收提示词，画幅与多张都由本地补齐",
     },
     "image": {
         "family": "Image Compatible", "text_to_image": True, "image_to_image": True,
-        "supported_sizes": ["1024x1024", "1536x1024", "1024x1536"],
-        "quality": False, "background": False, "style": False, "n": True,
+        "supported_sizes": SIZE_3_2, "size_mode": "free",
+        "quality": False, "background": False, "style": False, "n": True, "n_mode": "upstream",
+        "notes": "按 OpenAI 兼容协议发送，返回不足时自动补齐",
     },
     "generic": {
         "family": "Generic OpenAI Compatible", "text_to_image": True, "image_to_image": True,
-        "supported_sizes": ["1024x1024", "1536x1024", "1024x1536"],
-        "quality": False, "background": False, "style": False, "n": True,
+        "supported_sizes": SIZE_3_2, "size_mode": "free",
+        "quality": False, "background": False, "style": False, "n": True, "n_mode": "upstream",
+        "notes": "未识别的模型名，按 OpenAI 兼容协议发送，画幅与多张由中转站决定",
     },
 }
 
+# grok 的 matcher 用裸词 "grok"：真实模型名 grok-2-image 归一化后是
+# "grok 2 image"，不含 "grok image"，按旧写法永远匹配不上
 CAPABILITY_MATCHERS = (
     ("gpt-image", "gpt-image"), ("dall-e", "dall-e"), ("nano-banana", "nano-banana"),
     ("banana", "banana"), ("gemini image", "gemini"), ("seedream", "seedream"),
-    ("flux", "flux"), ("grok image", "grok image"), ("image", "image"),
+    ("flux", "flux"), ("grok image", "grok"), ("image", "image"),
 )
 
 HEALTH_TTL = 45
@@ -94,6 +135,8 @@ HEALTH_STATES = ("unchecked", "healthy", "slow", "rate_limited", "unavailable")
 MODELS_TTL = 600
 MAX_REFERENCE_BYTES = 10 * 1024 * 1024
 MAX_REFERENCE_COUNT = 4
+MAX_IMAGES = 4          # 一条提示词一次最多出图张数（与前端「数量」上限一致）
+MAX_PROMPT_CHARS = 8000  # 提示词长度上限，防止误粘贴整篇文档
 REFERENCE_MIMES = {"image/png", "image/jpeg", "image/webp"}
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -307,6 +350,34 @@ def with_tls_note(payload: dict) -> dict:
         payload["warning"] = note
     return payload
 
+def _upstream_detail(e: urllib.error.HTTPError) -> str:
+    """尽力读出上游返回的具体原因（中转站常把原因写在 error.message 里）。"""
+    try:
+        raw = e.read(4096)
+    except Exception:
+        return ""
+    if not raw:
+        return ""
+    text = raw.decode("utf-8", "replace").strip()
+    if not text:
+        return ""
+    try:
+        data = json.loads(text)
+        err = data.get("error")
+        if isinstance(err, str):
+            text = err
+        elif isinstance(err, dict):
+            text = err.get("message") or err.get("code") or text
+        else:
+            text = data.get("message") or data.get("msg") or text
+    except Exception:
+        pass  # 非 JSON 响应原样截取
+    text = re.sub(r"\s+", " ", str(text)).strip()
+    if not text or text in ("{}", "null"):
+        return ""
+    return f"：{text[:160]}"
+
+
 def friendly_error(e: Exception) -> str:
     """把上游异常翻译成可操作的中文提示。"""
     if isinstance(e, urllib.error.HTTPError):
@@ -316,7 +387,7 @@ def friendly_error(e: Exception) -> str:
             404: "接口不存在（HTTP 404），请检查中转站地址是否正确",
             429: "请求太频繁或额度不足（HTTP 429），请稍后再试",
         }.get(e.code, f"当前中转站不可用（HTTP {e.code}），请稍后重试或切换其他服务")
-        return head
+        return head + _upstream_detail(e)
     if isinstance(e, urllib.error.URLError):
         reason = getattr(e, "reason", e)
         if isinstance(reason, TimeoutError):
@@ -345,9 +416,13 @@ def error_status(e: Exception) -> str:
 
 
 def is_safe_failover_error(e: Exception) -> bool:
-    """Only retry errors that prove the request did not complete upstream."""
+    """Only retry failures that prove the request produced no image upstream.
+
+    401/403/404 是调用前的拒绝（密钥、权限、模型名），429 与 502/503/504 也能确定
+    上游没有出图；连接被拒同理。超时与其余状态码一律不切换，避免重复计费。
+    """
     if isinstance(e, urllib.error.HTTPError):
-        return e.code in (429, 502, 503, 504)
+        return e.code in (401, 403, 404, 429, 502, 503, 504)
     if isinstance(e, urllib.error.URLError):
         reason = getattr(e, "reason", None)
         return not isinstance(reason, TimeoutError) and "timed out" not in str(reason).lower()
@@ -368,7 +443,8 @@ def set_health(prov: dict, status: str, latency_ms: int | None = None, error: st
 def check_provider_health(prov: dict, force: bool = False) -> dict:
     if not prov or not prov.get("api_base") or not prov.get("api_key"):
         return {"status": "unavailable", "error": "未配置地址或密钥"}
-    existing = state["health"].get(prov["id"]) or {}
+    with STATE_LOCK:
+        existing = dict(state["health"].get(prov["id"]) or {})
     if not force and existing.get("checked_at") and time.time() - existing["checked_at"] < HEALTH_TTL:
         return existing
     started = time.perf_counter()
@@ -380,7 +456,8 @@ def check_provider_health(prov: dict, force: bool = False) -> dict:
     except Exception as e:
         status = "rate_limited" if isinstance(e, urllib.error.HTTPError) and e.code == 429 else "unavailable"
         set_health(prov, status, round((time.perf_counter() - started) * 1000), friendly_error(e))
-    return state["health"].get(prov["id"]) or {"status": "unavailable"}
+    with STATE_LOCK:
+        return dict(state["health"].get(prov["id"]) or {"status": "unavailable"})
 
 
 @app.get("/")
@@ -399,6 +476,13 @@ def settings_payload():
         "failover_enabled": bool(config.get("failover_enabled", False)),
         "version": APP_VERSION,
         "author": APP_AUTHOR,
+        # 让界面上的上限与后端校验保持同一来源，避免两边写死不一致
+        "limits": {
+            "max_images": MAX_IMAGES,
+            "max_references": MAX_REFERENCE_COUNT,
+            "max_reference_mb": MAX_REFERENCE_BYTES // (1024 * 1024),
+            "max_prompt_chars": MAX_PROMPT_CHARS,
+        },
     }
 
 
@@ -537,7 +621,8 @@ def fetch_models_for(prov: dict | None):
         return list(cached["models"]), None
     try:
         ids = [m["id"] for m in upstream("/v1/models", base=prov["api_base"], key=prov["api_key"], timeout=20).get("data", [])]
-        kw = ("image", "banana", "seedream", "kling", "dall", "flux")
+        kw = ("image", "banana", "seedream", "kling", "dall", "flux", "grok",
+              "sd", "stable", "cogview", "wan", "kolors", "janus", "ideogram", "recraft")
         result = sorted(i for i in ids if any(k in i.lower() for k in kw))
         with _models_cache_lock:
             _models_cache[pid] = {"models": result, "ts": now}
@@ -592,21 +677,32 @@ def test_conn():
 
 @app.post("/api/providers/health")
 def provider_health():
-    """Cheap /v1/models probe; cached for HEALTH_TTL seconds and never generates."""
+    """Cheap /v1/models probe; cached for HEALTH_TTL seconds and never generates.
+
+    多站时并行探测：一站超时不再拖住其余站点的结果。
+    """
     body = request.get_json(silent=True) or {}
     pid = (body.get("provider_id") or "").strip()
     targets = config["providers"] if not pid else [p for p in config["providers"] if p["id"] == pid]
     if pid and not targets:
         return jsonify({"error": "中转站不存在"}), 404
     force = bool(body.get("force"))
-    statuses = [dict(check_provider_health(p, force=force), provider_id=p["id"], provider_name=p["name"])
-                for p in targets]
+
+    def _check(p):
+        return dict(check_provider_health(p, force=force), provider_id=p["id"], provider_name=p["name"])
+
+    if len(targets) > 1:
+        with ThreadPoolExecutor(max_workers=min(8, len(targets))) as pool:
+            statuses = list(pool.map(_check, targets))
+    else:
+        statuses = [_check(p) for p in targets]
     return jsonify({"providers": statuses, "settings": settings_payload()})
 
 
 @app.get("/api/capabilities")
 def capabilities():
-    return jsonify({"capabilities": MODEL_CAPABILITIES, "matchers": CAPABILITY_MATCHERS})
+    return jsonify({"capabilities": MODEL_CAPABILITIES, "matchers": CAPABILITY_MATCHERS,
+                    "size_library": SIZE_LIBRARY, "size_groups": SIZE_GROUPS})
 
 
 # ---------- 生成 ----------
@@ -673,11 +769,15 @@ def _persist_image_results(data: dict, payload: dict, prov: dict, elapsed: float
     for i, item in enumerate(items):
         meta = {"model": payload["model"], "provider": prov["name"], "provider_id": prov["id"],
                 "elapsed": elapsed, "prompt": payload["prompt"], "size": payload.get("size", ""),
+                "size_requested": extra_meta.get("size_requested", ""),
+                "quality": payload.get("quality", ""), "background": payload.get("background", ""),
+                "style": payload.get("style", ""),
                 "created": int(time.time()), "created_time": time.strftime("%Y-%m-%d %H:%M:%S"),
                 "mode": extra_meta.get("mode", "text-to-image"),
                 "reference_used": bool(extra_meta.get("reference_used", False)),
                 "reference_name": extra_meta.get("reference_name", ""),
                 "reference_count": int(extra_meta.get("reference_count", 0)),
+                "requested": int(extra_meta.get("requested", 1)),
                 "failover": bool(extra_meta.get("failover", False)),
                 "failover_from": extra_meta.get("failover_from", "")}
         if item.get("b64_json"):
@@ -700,26 +800,37 @@ def _persist_image_results(data: dict, payload: dict, prov: dict, elapsed: float
     return results
 
 
-def _filtered_payload(body: dict, model: str, cap: dict) -> dict:
+def _filtered_payload(body: dict, model: str, cap: dict) -> tuple[dict, int]:
+    """构造上游 payload，并返回 (payload, 期望张数)。
+
+    只有在该模型族确实接收 n 时才把 n 发给中转站；其余情况由
+    _run_generation 分次补齐，保证界面上的「数量」对用户始终真实有效。
+    """
     payload = {"model": model, "prompt": (body.get("prompt") or "").strip()}
     raw_size = str(body.get("size") or "").strip().lower()
-    if re.fullmatch(r"\d{2,5}x\d{2,5}", raw_size):
+    if cap.get("size_mode") == "none":
+        pass  # 该模型族（如 grok image）不接收 size，整个字段不发
+    elif re.fullmatch(r"\d{2,5}x\d{2,5}", raw_size):
         # 用户显式指定的画幅原样透传，由中转站负责映射（new-api 系均支持）
         payload["size"] = raw_size
     elif cap.get("supported_sizes"):
         payload["size"] = cap["supported_sizes"][0]  # 未指定 → 该模型族默认
-    # 两者皆无 = 该模型族不接收 size（如 grok image），整个字段不发
+    # 皆无 = 该模型族没有官方尺寸可回退
+
+    target_n = 1
     if cap.get("n"):
         try:
-            payload["n"] = min(4, max(1, int(body.get("n", 1))))
+            target_n = min(MAX_IMAGES, max(1, int(body.get("n", 1))))
         except (TypeError, ValueError):
-            payload["n"] = 1
+            target_n = 1
+        if target_n > 1 and cap.get("n_mode", "upstream") == "upstream":
+            payload["n"] = target_n
     for key in ("quality", "background", "style"):
         value = body.get(key)
         allowed = cap.get(f"{key}_values")
         if cap.get(key) and value and (not allowed or value in allowed):
             payload[key] = value
-    return payload
+    return payload, target_n
 
 
 def _reference_files():
@@ -738,7 +849,7 @@ def _reference_files():
         if not blob:
             return None, f"参考图为空（{image.filename}）"
         if len(blob) > MAX_REFERENCE_BYTES:
-            return None, f"参考图过大，请控制在 10MB 以内（{image.filename}）"
+            return None, f"参考图过大，请控制在 {MAX_REFERENCE_BYTES // (1024 * 1024)}MB 以内（{image.filename}）"
         references.append((image.filename, mime, blob))
     return references, None
 
@@ -750,9 +861,10 @@ def _providers_for_model(model: str, primary: dict):
 class GenError(Exception):
     """生成失败，携带给前端看的中文说明与 HTTP 状态。"""
 
-    def __init__(self, message: str, status: int = 502):
+    def __init__(self, message: str, status: int = 502, cause: Exception | None = None):
         super().__init__(message)
         self.status = status
+        self.cause = cause
 
 
 def _parse_generation_body():
@@ -767,66 +879,146 @@ def _parse_generation_body():
     return body, reference, None
 
 
-def _run_generation(model: str, payload: dict, reference: list | None) -> dict:
-    """单条 prompt 的完整生成流程：调用上游、安全故障切换、持久化。失败抛 GenError。"""
+def _call_with_failover(model: str, prov: dict, body: dict, call, allow_failover: bool = True):
+    """一次上游调用（含可选的安全故障切换）。
+
+    返回 (data, 实际使用的中转站, 切换来源名称)。失败抛 GenError，并把原始异常
+    放在 .cause 上，方便调用方识别「带 n 被拒」这类可自愈的错误。
+    """
+    try:
+        data = call(body, prov)
+        set_health(prov, "healthy")
+        return data, prov, ""
+    except Exception as primary_error:
+        set_health(prov, error_status(primary_error), error=friendly_error(primary_error))
+        if not allow_failover or not config.get("failover_enabled") or not is_safe_failover_error(primary_error):
+            raise GenError(friendly_error(primary_error), cause=primary_error)
+        candidates = _providers_for_model(model, prov)
+        if not candidates:
+            raise GenError(f"主中转站失败，备用站没有同名模型（{model}）", cause=primary_error)
+        backup = candidates[0]  # at most one fallback request per round
+        try:
+            data = call(body, backup)
+            set_health(backup, "healthy")
+        except Exception as backup_error:
+            set_health(backup, error_status(backup_error), error=friendly_error(backup_error))
+            raise GenError(f"主线路与备用线路均不可用：{friendly_error(backup_error)}", cause=backup_error)
+        with CONFIG_LOCK:
+            config["active_provider"] = backup["id"]
+            save_config()
+        return data, backup, prov["name"]
+
+
+def _run_generation(model: str, payload: dict, reference: list | None, target_n: int = 1,
+                    should_stop=None, fallback_size: str | None = None) -> dict:
+    """完整生成流程：按需要出 target_n 张，调用上游、安全故障切换、持久化。
+
+    中转站一次只返回 1 张时（gpt-image / gemini / grok 等官方接口的常态）会继续
+    追加请求补齐，因此「数量」选择永远能得到对应张数；补齐过程中失败则保留已出
+    的图并如实告知，不会把整次生成判为失败。
+
+    画幅被中转站拒绝（400/422，常见于它只认官方尺寸）时，会退到该模型族的官方
+    尺寸重试一次，并把「你要的尺寸」与「实际用的尺寸」都写进元数据。失败抛 GenError。
+    """
     prov = active_provider()
     if not prov or not prov.get("api_base") or not prov.get("api_key"):
         raise GenError("还没有可用的中转站，请在设置里添加并填写地址和密钥", 400)
+    target_n = max(1, min(MAX_IMAGES, int(target_n or 1)))
     mode = "image-to-image" if reference else "text-to-image"
     path = "/v1/images/edits" if reference else "/v1/images/generations"
     # 单张沿用 image 字段；多张按官方 edits 约定用 image[]
     file_field = "image" if reference and len(reference) == 1 else "image[]"
     files = [(file_field, fn, blob, mime) for fn, mime, blob in reference] if reference else []
+    sends_n = "n" in payload   # 上游收到的 payload 里是否已经带了 n
+    size_dropped = ""          # 被拒绝后回退掉的原始画幅
 
-    def call(target):
-        if reference:
-            return upstream_multipart(path, payload, files,
-                                      base=target["api_base"], key=target["api_key"])
-        return upstream(path, payload, base=target["api_base"], key=target["api_key"])
+    def call(body, target):
+        if files:
+            return upstream_multipart(path, body, files, base=target["api_base"], key=target["api_key"])
+        return upstream(path, body, base=target["api_base"], key=target["api_key"])
 
+    images, errors = [], []
     failover = False
     failover_from = ""
+    tls_notes = []          # 证书降级等线程本地提示要带回给前端（任务队列里没人读线程本地值）
     started = time.time()
-    try:
-        data = call(prov)
-        set_health(prov, "healthy", round((time.time() - started) * 1000))
-    except Exception as primary_error:
-        set_health(prov, error_status(primary_error), round((time.time() - started) * 1000), friendly_error(primary_error))
-        if not config.get("failover_enabled") or not is_safe_failover_error(primary_error):
-            raise GenError(friendly_error(primary_error))
-        candidates = _providers_for_model(model, prov)
-        if not candidates:
-            raise GenError(f"主中转站失败，备用站没有同名模型（{model}）")
-        backup = candidates[0]  # at most one fallback request
+    attempts = 0
+    while len(images) < target_n and attempts < MAX_IMAGES * 2 + 6:
+        if images and should_stop and should_stop():
+            break   # 已出图且用户取消：停在当前这张，不再追加请求
+        attempts += 1
+        body = dict(payload)
+        if sends_n:
+            # 首轮按用户张数请求；补齐轮只要还差的张数
+            body["n"] = target_n - len(images)
+        else:
+            body.pop("n", None)   # 上游只吃 n=1 时，补齐轮不能把 n 再带出去
+        round_started = time.time()
         try:
-            started = time.time()
-            data = call(backup)
-            set_health(backup, "healthy", round((time.time() - started) * 1000))
-            failover, failover_from = True, prov["name"]
-            with CONFIG_LOCK:
-                config["active_provider"] = backup["id"]
-                save_config()
-            prov = backup
-        except Exception as backup_error:
-            set_health(backup, error_status(backup_error), round((time.time() - started) * 1000), friendly_error(backup_error))
-            raise GenError(f"主线路与备用线路均不可用：{friendly_error(backup_error)}")
+            data, prov, switched_from = _call_with_failover(
+                model, prov, body, call, allow_failover=not images)
+        except GenError as e:
+            cause = e.cause
+            rejected = isinstance(cause, urllib.error.HTTPError) and cause.code in (400, 404, 422)
+            if rejected and sends_n:
+                # 官方 gpt-image 只接受 n=1：带 n 被拒时去掉 n 再试一次
+                sends_n = False
+                continue
+            if rejected and body.get("size") and fallback_size and body["size"] != fallback_size:
+                # 中转站不认这个画幅：退到官方尺寸重来，别让用户白等一次
+                size_dropped = body["size"]
+                payload = {**payload, "size": fallback_size}
+                errors.append(f"中转站不接受 {size_dropped}，已改用 {fallback_size}")
+                continue
+            if images:   # 已经出了图，剩下的补不齐只提示，不整单失败
+                errors.append(str(e))
+                break
+            raise
+        tls = getattr(_tls_note, "value", None)
+        if tls and tls not in tls_notes:
+            tls_notes.append(tls)
+        if switched_from:
+            failover, failover_from = True, switched_from
+        round_elapsed = round(time.time() - round_started, 1)
+        try:
+            round_images = _persist_image_results(data, body, prov, round_elapsed, {
+                "mode": mode, "reference_used": bool(reference),
+                "reference_name": "、".join(fn for fn, _, _ in reference) if reference else "",
+                "reference_count": len(reference) if reference else 0,
+                "requested": target_n, "size_requested": size_dropped,
+                "failover": failover, "failover_from": failover_from,
+            })
+        except ValueError as e:
+            if images:
+                errors.append(str(e))
+                break
+            raise GenError(str(e))
+        if not round_images:
+            errors.append("上游返回的数据里没有可用图片")
+            break
+        images.extend(round_images)
 
+    if not images:
+        raise GenError(errors[0] if errors else "上游未返回图片")
     elapsed = round(time.time() - started, 1)
-    try:
-        images = _persist_image_results(data, payload, prov, elapsed, {
-            "mode": mode, "reference_used": bool(reference),
-            "reference_name": "、".join(fn for fn, _, _ in reference) if reference else "",
-            "reference_count": len(reference) if reference else 0,
-            "failover": failover, "failover_from": failover_from,
-        })
-    except ValueError as e:
-        raise GenError(str(e))
     response = {"images": images, "elapsed": elapsed, "model": model,
                 "prompt": payload.get("prompt", ""),
                 "provider": prov["name"], "provider_id": prov["id"], "mode": mode,
+                "requested": target_n, "returned": len(images),
+                "size": payload.get("size", ""), "size_requested": size_dropped,
                 "failover": failover, "failover_from": failover_from}
+    notes = []
     if failover:
-        response["notice"] = f"主线路「{failover_from}」暂时不可用，已通过「{prov['name']}」完成生成"
+        notes.append(f"主线路「{failover_from}」暂时不可用，已通过「{prov['name']}」完成生成")
+    if size_dropped:
+        notes.append(f"中转站不接受 {size_dropped}，已按 {payload.get('size', '')} 出图")
+    if len(images) < target_n:
+        notes.append(f"请求 {target_n} 张，实际得到 {len(images)} 张"
+                     f"（{errors[0] if errors else '上游未返回更多图片'}）")
+    if tls_notes:
+        notes.extend(tls_notes)
+    if notes:
+        response["notice"] = "；".join(notes)
     return response
 
 
@@ -836,23 +1028,27 @@ def generate():
     if error:
         return jsonify({"error": error}), 400
     prompt = (body.get("prompt") or "").strip()
-    model = (body.get("model") or "fal-gpt-image-2").strip()
+    model = (body.get("model") or "").strip()
     if not prompt:
         return jsonify({"error": "提示词不能为空"}), 400
+    if len(prompt) > MAX_PROMPT_CHARS:
+        return jsonify({"error": f"提示词过长（{len(prompt)} 字），请控制在 {MAX_PROMPT_CHARS} 字以内"}), 400
+    if not model:
+        return jsonify({"error": "请先选择或填写模型"}), 400
     cap = capability_for(model)
     if reference and not cap.get("image_to_image"):
         return jsonify({"error": "当前模型暂未声明参考图能力"}), 400
-    payload = _filtered_payload(body, model, cap)
+    payload, target_n = _filtered_payload(body, model, cap)
     try:
-        response = _run_generation(model, payload, reference)
+        response = _run_generation(model, payload, reference, target_n,
+                                   fallback_size=(cap.get("supported_sizes") or [None])[0])
     except GenError as e:
-        return jsonify({"error": str(e)}), e.status
+        return jsonify(with_tls_note({"error": str(e)})), e.status
     return jsonify(with_tls_note(response))
 
 
-# ---------- 连拍任务队列 ----------
-# 单 worker 串行：同一密钥并发请求容易触发限流、也容易重复计费
-MAX_BATCH_PROMPTS = 20
+# ---------- 生成任务队列 ----------
+# 一条提示词 + N 张出图的进度与取消都靠它；单 worker 串行，避免同一密钥并发触发限流
 TASK_RETENTION = 1800  # 已结束的任务保留 30 分钟供查询
 _tasks = {}
 _tasks_lock = threading.Lock()
@@ -872,13 +1068,15 @@ def _purge_tasks():
 def _run_batch_task(task: dict):
     for i, prompt in enumerate(task["prompts"]):
         with _tasks_lock:
-            if task["status"] == "cancelled":
+            if task["status"] in ("cancelled", "cancelling"):
                 break
             task["status"] = "running"
             task["index"] = i
         payload = {**task["base_payload"], "prompt": prompt}
         try:
-            result = _run_generation(task["model"], payload, task["reference"])
+            result = _run_generation(task["model"], payload, task["reference"], task.get("target_n", 1),
+                                     should_stop=lambda: task["status"] in ("cancelled", "cancelling"),
+                                     fallback_size=task.get("fallback_size"))
             with _tasks_lock:
                 task["images"].extend(result["images"])
                 if result.get("notice"):
@@ -890,7 +1088,10 @@ def _run_batch_task(task: dict):
             with _tasks_lock:
                 task["errors"].append({"prompt": prompt, "error": f"生成失败：{e}"})
     with _tasks_lock:
-        if task["status"] != "cancelled":
+        # 取消只在任务真正收尾后才算完成：已经在飞的那张仍会入账
+        if task["status"] == "cancelling":
+            task["status"] = "cancelled"
+        elif task["status"] != "cancelled":
             task["status"] = "failed" if task["errors"] and not task["images"] else "done"
         task["finished_at"] = time.time()
 
@@ -916,16 +1117,20 @@ threading.Thread(target=_task_worker, daemon=True, name="gen-queue").start()
 
 @app.post("/api/generate-task")
 def generate_task():
-    """一行一条提示词，整批入队顺序生成。"""
+    """整段提示词 = 一次生成，按「数量」出 N 张。
+
+    队列只用来把多张出图拆成可观察、可取消的步骤：提示词原样使用，
+    不按行、不按空行拆分——用户写几段都只算一条提示词。
+    """
     body, reference, error = _parse_generation_body()
     if error:
         return jsonify({"error": error}), 400
-    model = (body.get("model") or "fal-gpt-image-2").strip()
-    prompts = [ln.strip() for ln in str(body.get("prompt") or "").splitlines() if ln.strip()]
-    if not prompts:
+    model = (body.get("model") or "").strip()
+    prompt = str(body.get("prompt") or "").strip()
+    if not prompt:
         return jsonify({"error": "提示词不能为空"}), 400
-    if len(prompts) > MAX_BATCH_PROMPTS:
-        return jsonify({"error": f"一次最多连拍 {MAX_BATCH_PROMPTS} 条"}), 400
+    if len(prompt) > MAX_PROMPT_CHARS:
+        return jsonify({"error": f"提示词过长（{len(prompt)} 字），请控制在 {MAX_PROMPT_CHARS} 字以内"}), 400
     if not model:
         return jsonify({"error": "请先选择或填写模型"}), 400
     cap = capability_for(model)
@@ -934,25 +1139,29 @@ def generate_task():
     prov = active_provider()
     if not prov or not prov.get("api_base") or not prov.get("api_key"):
         return jsonify({"error": "还没有可用的中转站，请在设置里添加并填写地址和密钥"}), 400
-    base_payload = _filtered_payload(body, model, cap)
-    base_payload.pop("prompt", None)  # 每条提示词执行时单独填入
+    base_payload, target_n = _filtered_payload(body, model, cap)
+    base_payload.pop("prompt", None)  # 执行时填入整段提示词
     _purge_tasks()
     tid = uuid.uuid4().hex[:12]
-    task = {"id": tid, "status": "queued", "model": model, "prompts": prompts,
-            "base_payload": base_payload, "reference": reference,
-            "total": len(prompts), "index": 0, "images": [], "errors": [],
+    task = {"id": tid, "status": "queued", "model": model, "prompts": [prompt],
+            "base_payload": base_payload, "reference": reference, "target_n": target_n,
+            "fallback_size": (cap.get("supported_sizes") or [None])[0],
+            "total": 1, "index": 0, "images": [], "errors": [],
             "notice": "", "created_at": time.time(), "finished_at": None}
     with _tasks_lock:
         _tasks[tid] = task
     _task_queue.put(tid)
-    return jsonify({"task_id": tid, "total": len(prompts)})
+    return jsonify({"task_id": tid, "total": 1, "target_n": target_n,
+                    "target_images": target_n})
 
 
 def _task_snapshot(task: dict) -> dict:
     # 只在持锁时调用
     idx = min(task["index"], len(task["prompts"]) - 1) if task["prompts"] else 0
+    target_n = task.get("target_n", 1)
     return {"id": task["id"], "status": task["status"], "model": task["model"],
-            "index": task["index"], "total": task["total"],
+            "index": task["index"], "total": task["total"], "target_n": target_n,
+            "target_images": target_n * task["total"],
             "prompt": task["prompts"][idx] if task["prompts"] else "",
             "image_count": len(task["images"]), "images": list(task["images"]),
             "errors": list(task["errors"]), "notice": task["notice"]}
@@ -970,14 +1179,18 @@ def task_status():
 
 @app.post("/api/task/cancel")
 def task_cancel():
-    """取消在下一条 Prompt 前生效；不打断正在上游执行的请求，避免重复计费。"""
+    """请求取消：下一个上游请求前生效，已发出的请求不打断，避免重复计费。
+
+    状态先置为 cancelling，等 worker 真正收尾（可能还要等回一张图）才变 cancelled，
+    这样前端轮询不会在图片入库前就提前收工。
+    """
     tid = (request.get_json(force=True).get("id") or "").strip()
     with _tasks_lock:
         task = _tasks.get(tid)
         if not task:
             return jsonify({"error": "任务不存在"}), 404
         if task["status"] in ("queued", "running"):
-            task["status"] = "cancelled"
+            task["status"] = "cancelling"
         return jsonify({"ok": True, "status": task["status"]})
 
 
@@ -1102,9 +1315,15 @@ def history():
             "elapsed": meta.get("elapsed"),
             "prompt": meta.get("prompt", ""),
             "size": meta.get("size", ""),
+            "size_requested": meta.get("size_requested", ""),
+            "quality": meta.get("quality", ""),
+            "background": meta.get("background", ""),
+            "style": meta.get("style", ""),
             "mode": meta.get("mode", "text-to-image"),
             "reference_used": bool(meta.get("reference_used", False)),
             "reference_name": meta.get("reference_name", ""),
+            "reference_count": int(meta.get("reference_count", 0) or 0),
+            "requested": int(meta.get("requested", 1) or 1),
             "failover": bool(meta.get("failover", False)),
             "failover_from": meta.get("failover_from", ""),
             "favorite": bool(meta.get("favorite", False)),
@@ -1147,6 +1366,7 @@ def favorite():
     _write_meta(name, meta)
     with _hist_lock:
         _hist_meta[name] = meta
+        _hist_sc_mtime[name] = (OUTPUT_DIR / (name + ".json")).stat().st_mtime
     return jsonify({"ok": True, "name": name, "favorite": meta["favorite"]})
 
 
@@ -1194,6 +1414,10 @@ def outputs(name):
 if __name__ == "__main__":
     import webbrowser
 
-    threading.Timer(1.0, lambda: webbrowser.open("http://127.0.0.1:7860")).start()
-    print(f"「{config['name']}」运行中: http://127.0.0.1:7860  (Ctrl+C 退出)")
-    app.run(host="127.0.0.1", port=7860, debug=False)
+    host = os.environ.get("HOST", "127.0.0.1")
+    port = int(os.environ.get("PORT", "7860"))
+    url = f"http://{host}:{port}"
+    if os.environ.get("NO_BROWSER", "") not in ("1", "true", "yes"):
+        threading.Timer(1.0, lambda: webbrowser.open(url)).start()
+    print(f"「{config['name']}」运行中: {url}  (Ctrl+C 退出)")
+    app.run(host=host, port=port, debug=False)

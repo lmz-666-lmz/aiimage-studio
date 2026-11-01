@@ -11,6 +11,10 @@ outputs/
 __pycache__/
 *.pyc
 
-# IDE
+# IDE / 工具
 .idea/
 .vscode/
+.zcode/
+
+# 服务日志（后台启动时写入，可安全删除）
+logs/
