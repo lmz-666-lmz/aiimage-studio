@@ -3,7 +3,7 @@
   <h1>AI Image Studio · 拾光</h1>
   <p><b>为你量身打造的本地优先 · 个人 AI 生图工作台与灵感画廊</b><br>聚合各路 API Key · 多模型调度 · 一条提示词多张出图 · 元数据追溯 · 零 GPU / Node 依赖</p>
   <p>
-    <a href="https://github.com/lmz-666-lmz/ai-image-studio"><img src="https://img.shields.io/badge/GitHub-Repo-181717.svg?logo=github" alt="GitHub"></a>
+    <a href="https://github.com/lmz-666-lmz/aiimage-studio"><img src="https://img.shields.io/badge/GitHub-Repo-181717.svg?logo=github" alt="GitHub"></a>
     <img src="https://img.shields.io/badge/Version-v1.4.0-e2ad62.svg" alt="v1.4.0">
     <img src="https://img.shields.io/badge/License-MIT-2ea44f.svg" alt="MIT">
     <img src="https://img.shields.io/badge/Python-3.10+-3776ab.svg?logo=python" alt="Python 3.10+">
@@ -61,7 +61,7 @@
 ## 🚀 快速开始
 
 ```bash
-git clone https://github.com/lmz-666-lmz/ai-image-studio.git
+git clone https://github.com/lmz-666-lmz/aiimage-studio.git ai-image-studio
 cd ai-image-studio
 pip install -r requirements.txt   # 仅 Flask 一个依赖
 python app.py                     # 自动打开 http://127.0.0.1:7860
