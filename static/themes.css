@@ -1,0 +1,46 @@
+html[data-theme="celadon"] {
+  color-scheme: light;
+  --bg: #eaf1ed; --panel: #f5f9f6; --raised: #dce8e1;
+  --text: #132d26; --dim: #345449; --faint: #486258;
+  --accent: #126149; --accent-2: #0c513e; --on-accent: #fff;
+  --line: #b7ccc1; --line-strong: #729283;
+  --success: #12603e; --danger: #9f313e;
+  --glass: #f5f9f6e8; --glass-dock: #f5f9f6f5;
+  --rim: #214a3522; --go-deep: #174b37; --dev-bg: #173029;
+  --shadow: #152d2436; --panel-hi: #5279650d; --raised-hi: #5279651a;
+}
+html[data-theme="berry"] {
+  color-scheme: dark;
+  --bg: #211326; --panel: #2c1d34; --raised: #3c2843;
+  --text: #fff1f7; --dim: #e4c5da; --faint: #c8a6be;
+  --accent: #ff97c5; --accent-2: #ffc0de; --on-accent: #351327;
+  --line: #57384f; --line-strong: #926581;
+  --success: #a6dfc5; --danger: #ffac9c;
+  --glass: #2c1d34eb; --glass-dock: #2c1d34f5;
+  --rim: #ffe2f31c; --go-deep: #69334f; --dev-bg: #1b1020;
+  --shadow: #1108129e; --panel-hi: #fbc7dc0c; --raised-hi: #fbc7dc19;
+}
+html[data-theme="marine"] {
+  color-scheme: dark;
+  --bg: #071e26; --panel: #0e2b34; --raised: #163e49;
+  --text: #e6faf7; --dim: #c0e1de; --faint: #9bc4c6;
+  --accent: #74e6c3; --accent-2: #abf8d8; --on-accent: #0a352f;
+  --line: #2b5662; --line-strong: #54858b;
+  --success: #aadb99; --danger: #ffad9e;
+  --glass: #0e2b34e8; --glass-dock: #0e2b34f5;
+  --rim: #b3f4e91a; --go-deep: #11544a; --dev-bg: #071a21;
+  --shadow: #0311169e; --panel-hi: #b4fff00b; --raised-hi: #b4fff01a;
+}
+html:is([data-theme="celadon"], [data-theme="berry"], [data-theme="marine"]) {
+  --bg-gradient: var(--bg);
+  --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
+  --accent-glow: color-mix(in srgb, var(--accent) 20%, transparent);
+  --shadow-card: 0 5px 16px -6px var(--shadow);
+  --shadow-card-hover: 0 10px 27px -8px var(--shadow);
+  --select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='m1 1 4 4 4-4' fill='none' stroke='%23859a95' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E");
+}
+.themes .theme-btn[aria-checked="true"] .theme-name::after { content: " ✓"; }
+@media (max-width: 530px) {
+  .themes { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .themes .theme-btn { min-height: 56px; padding: 8px 4px; }
+}

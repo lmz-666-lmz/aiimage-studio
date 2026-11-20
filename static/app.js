@@ -444,7 +444,7 @@ function themePulse() {
 }
 
 /* ---------- 设置 ---------- */
-async function loadSettings() {
+async function loadSettings({ promptSetup = false } = {}) {
   try {
     const s = await (await fetch("/api/settings")).json();
     applyIdentity(s.name, s.theme);
@@ -465,9 +465,9 @@ async function loadSettings() {
     markTheme(s.theme);
     const noApi = !providers.length;
     $("need-api").hidden = !noApi;
-    if (noApi && $("settings").hidden) {
-      $("settings").hidden = false; // 首次使用直接带出设置
-      $("set-msg").textContent = "先添加一个 API 中转站，保存后即可生图";
+    if (promptSetup && noApi && settingsEl.hidden) {
+      openSettings();
+      setMsg("先添加一个 API 中转站，保存后即可生图");
       openProviderForm("");
     }
   } catch { /* 用默认值 */ }
@@ -809,7 +809,12 @@ function renderReferenceNote(cap) {
 }
 
 function markTheme(t) {
-  document.querySelectorAll(".theme-btn").forEach((b) => b.classList.toggle("on", b.dataset.theme === t));
+  document.querySelectorAll(".theme-btn").forEach((b) => {
+    const active = b.dataset.theme === t;
+    b.classList.toggle("on", active);
+    b.setAttribute("role", "radio");
+    b.setAttribute("aria-checked", String(active));
+  });
 }
 
 /* ---------- 中转站管理 ---------- */
@@ -1006,49 +1011,85 @@ $("name-save").addEventListener("click", async () => {
 
 $("set-name").addEventListener("keydown", (e) => { if (e.key === "Enter") $("name-save").click(); });
 
-document.querySelectorAll(".theme-btn").forEach((btn) => {
-  btn.addEventListener("click", async () => {
-    const t = btn.dataset.theme;
-    markTheme(t);
-    applyIdentity(null, t);
-    themePulse();
-    try {
-      await fetch("/api/settings", {
+let themeWrites = Promise.resolve();
+window.setStudioTheme = function setStudioTheme(theme) {
+  markTheme(theme);
+  applyIdentity(null, theme);
+  themePulse();
+  themeWrites = themeWrites.then(async () => {
+    const response = await fetch("/api/settings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ theme: t }),
-      });
-    } catch { /* 下次再存 */ }
+        body: JSON.stringify({ theme }),
+    });
+    if (!response.ok) throw new Error("工作室未能保存主题");
+  }).catch(() => {
+    if (document.documentElement.dataset.theme === theme) showToast("主题已预览，本次保存失败", "error");
   });
+  return themeWrites;
+};
+document.querySelectorAll(".theme-btn").forEach((btn) => {
+  btn.addEventListener("click", () => window.setStudioTheme(btn.dataset.theme));
 });
 
 const settingsEl = $("settings");
 
+const overlayOpeners = new WeakMap();
+function showOverlay(el, focusTarget) {
+  if (el.hidden || el.classList.contains("closing")) overlayOpeners.set(el, document.activeElement);
+  el.classList.remove("closing");
+  el.hidden = false;
+  focusTarget.focus({ preventScroll: true });
+}
+
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Tab" || document.querySelector("dialog[open]")) return;
+  const overlay = ["shortcuts-modal", "compare-modal", "lightbox", "settings"]
+    .map($).find(el => !el.hidden && !el.classList.contains("closing"));
+  if (!overlay) return;
+  const targets = [...overlay.querySelectorAll("button:not(:disabled), a[href], input:not(:disabled), textarea, select, summary, [tabindex='0']")]
+    .filter(el => el.tabIndex >= 0 && el.getClientRects().length);
+  if (!targets.length) return;
+  const focus = document.activeElement;
+  if (!overlay.contains(focus) || focus === (event.shiftKey ? targets[0] : targets.at(-1))) {
+    event.preventDefault();
+    (event.shiftKey ? targets.at(-1) : targets[0]).focus();
+  }
+}, true);
+
 /* 带退场动画地关闭弹窗（灯箱、设置与对比共用 .lightbox 的 closing 关键帧） */
 function closeOverlayAnimated(el, after) {
   if (!el || el.hidden || el.classList.contains("closing")) return;
-  if (reduceMotion) {
+  const finish = () => {
+    const restore = el.contains(document.activeElement) || document.activeElement === document.body;
     el.hidden = true;
+    el.classList.remove("closing");
     if (after) after();
+    if (restore && !document.querySelector(".lightbox:not([hidden]), dialog[open]")) {
+      const opener = overlayOpeners.get(el);
+      const fallback = document.body.classList.contains("composer-open") ? $("rail-collapse-btn") : $("composer-open");
+      (opener?.isConnected && opener.getClientRects().length && !opener.closest("[inert]") ? opener : fallback).focus({ preventScroll: true });
+    }
+    overlayOpeners.delete(el);
+  };
+  if (reduceMotion) {
+    finish();
     return;
   }
   el.classList.add("closing");
   setTimeout(() => {
     if (!el.classList.contains("closing")) return;
-    el.classList.remove("closing");
-    el.hidden = true;
-    if (after) after();
+    finish();
   }, 180);
 }
 
 function closeSettings() {
   closeProviderForm();
-  closeOverlayAnimated(settingsEl, loadSettings);
+  closeOverlayAnimated(settingsEl, () => themeWrites.then(() => loadSettings()));
 }
 
 function openSettings() {
-  settingsEl.classList.remove("closing");
-  settingsEl.hidden = false;
+  showOverlay(settingsEl, $("set-close"));
 }
 
 $("open-settings").addEventListener("click", () => { openSettings(); setMsg(""); refreshHealth(false); });
@@ -1225,13 +1266,15 @@ async function loadHistory(p = page, scrollToTop = true) {
   const qs = filterQuery();
   try {
     const r = await fetch(`/api/history?page=${p}&page_size=${PAGE_SIZE}&${qs}`);
-    if (!r.ok) return;
+    if (!r.ok) throw new Error("history");
     const d = await r.json();
     if (requestId !== historyRequest || qs !== filterQuery()) return;
+    $("history-error").hidden = true;
     page = d.page; pages = d.pages; total = d.total;
     wallItems = d.items;
+    if (batchMode) updateBatchCount();
     const wallCountEl = $("wall-count");
-    if (wallCountEl) wallCountEl.textContent = `共 ${total} 幅作品`;
+    if (wallCountEl) wallCountEl.textContent = `${total} 幅`;
     fillSelect($("f-model"), d.facets.models, "全部模型");
     fillSelect($("f-provider"), d.facets.providers, "全部来源");
     const g = $("gallery");
@@ -1251,8 +1294,12 @@ async function loadHistory(p = page, scrollToTop = true) {
     let vi = 0;
     for (const card of g.querySelectorAll(".print[data-name]")) watchReveal(card, Math.min(vi++, 9) * 45);
     revealSafetyNet();
-    if (scrollToTop) document.querySelector(".wall").scrollTo({ top: 0 });
-  } catch { /* 加载失败不阻塞 */ }
+    if (scrollToTop) $("library-heading").scrollIntoView({ block: "start" });
+  } catch {
+    if (requestId !== historyRequest || qs !== filterQuery()) return;
+    $("history-error").hidden = false;
+    for (const id of ["empty", "empty-filter", "empty-final", "pager"]) $(id).hidden = true;
+  }
 }
 
 $("pager").addEventListener("click", (e) => {
@@ -1301,7 +1348,15 @@ $("f-final").addEventListener("click", () => {
 let batchMode = false;
 const selected = new Set();
 
-function updateBatchCount() { $("batch-count").textContent = `已选 ${selected.size} 张`; }
+function offPageSelectionCount() {
+  return selected.size - wallItems.filter(({ name }) => selected.has(name)).length;
+}
+
+function updateBatchCount() {
+  const offPage = offPageSelectionCount();
+  $("batch-count").textContent = `已选 ${selected.size} 张${offPage ? `（含其他页面 ${offPage} 张）` : ""}`;
+  document.dispatchEvent(new Event("studio:selectionchange"));
+}
 
 function setBatchMode(on) {
   batchMode = on;
@@ -1325,14 +1380,18 @@ $("f-batch").addEventListener("click", () => setBatchMode(!batchMode));
 $("batch-exit").addEventListener("click", () => setBatchMode(false));
 $("batch-all").addEventListener("click", () => {
   wallItems.forEach((it) => { if (it.name) selected.add(it.name); });
-  document.querySelectorAll("#gallery .print").forEach((c) => c.classList.add("selected"));
+  document.querySelectorAll("#gallery .print[data-name]").forEach((card) => {
+    card.classList.toggle("selected", selected.has(card.dataset.name));
+  });
   updateBatchCount();
-  showToast(`已全选当前页共 ${selected.size} 张照片`, "info");
+  showToast(`已选本页 ${wallItems.length} 张，共 ${selected.size} 张`, "info");
 });
 $("batch-del").addEventListener("click", async () => {
   const names = [...selected];
   if (!names.length) { setGenMsg("先点击图片勾选要删除的照片"); showToast("请先点击图片勾选要删除的照片", "error"); return; }
-  if (!confirm(`删除所选 ${names.length} 张照片？文件会从 outputs 里移除。`)) return;
+  const offPage = offPageSelectionCount();
+  const selection = offPage ? `${names.length} 张照片（含其他页面 ${offPage} 张）` : `${names.length} 张照片`;
+  if (!confirm(`删除所选 ${selection}？文件会从 outputs 里移除。`)) return;
   try {
     const r = await fetch("/api/delete", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -1351,6 +1410,7 @@ $("batch-del").addEventListener("click", async () => {
 /* ---------- 卡片复用全部参数 ---------- */
 function reuseParamsFromItem(item) {
   if (!item) return;
+  window.openStudioComposer?.(false);
   if (editSource && !busy) setEditSource(null);
   const done = [];
   if (item.prompt) { setPrompt(item.prompt); done.push("提示词"); }
@@ -1396,13 +1456,15 @@ function makeCard(item, fresh) {
   const card = document.createElement("div");
   card.className = "print" + (selected.has(item.name) ? " selected" : "");
   card.dataset.name = item.name || "";
-  const secs = item.elapsed != null ? `<span class="secs">${item.elapsed}s</span>` : "";
+  const secs = Number.isFinite(item.elapsed) ? `<span class="secs">${item.elapsed}s</span>` : "";
   const model = item.model || (item.fetch_error ? "远端原图" : "早期图片");
-  const date = item.created_time ? item.created_time.slice(5, 10) : "";
+  const date = item.created_time ? escapeHtml(item.created_time.slice(5, 10)) : "";
+  const caption = String(item.edit?.change || item.prompt || item.name || "未命名作品").replace(/\s+/g, " ").trim();
   card.title = item.prompt || item.fetch_error || "";
   card.innerHTML = `
     <div class="print-img-wrap">
-      <img src="${item.url}" alt="生成的图片" loading="lazy">
+      <img src="${escapeHtml(item.thumbnail_url || item.url)}" alt="${escapeHtml(caption.slice(0, 100))}" loading="lazy" decoding="async">
+      <button class="print-open" type="button" aria-label="${escapeHtml("查看或选择作品：" + caption.slice(0, 50))}"></button>
       <div class="print-actions-overlay">
         <button class="p-action-btn p-zoom" type="button" title="检视大图">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
@@ -1416,11 +1478,12 @@ function makeCard(item, fresh) {
         <button class="p-action-btn p-compare" type="button" title="加入 A/B 画面对比">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/></svg>
         </button>
-        <a href="${item.url}" class="p-action-btn p-dl" download title="下载原图">
+        <a href="${escapeHtml(item.url)}" class="p-action-btn p-dl" download title="下载原图">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         </a>
       </div>
     </div>
+    <p class="print-caption">${escapeHtml(caption)}</p>
     <div class="meta">
       <button class="fav ${item.favorite ? "on" : ""}" type="button" title="收藏 / 取消收藏">★</button>
       <span class="model" title="${escapeHtml(model)}">${escapeHtml(model)}</span>
@@ -1433,6 +1496,8 @@ function makeCard(item, fresh) {
     if (batchMode) toggleSelect(card, item);
     else openLightbox(item.url, item.name);
   };
+  const preview = card.querySelector("img");
+  if (item.thumbnail_url) preview.addEventListener("error", () => { preview.src = item.url; }, { once: true });
 
   card.querySelector(".print-img-wrap").addEventListener("click", (e) => {
     if (e.target.closest(".p-action-btn")) return;
@@ -1699,22 +1764,34 @@ $("prompt").addEventListener("paste", (e) => {
 
 /* ---------- 生成任务 & 暗房显影动态状态机 ---------- */
 let currentTaskId = null;
+const TASK_CONTROL_TIMEOUT_MS = 5000;
+const MAX_TASK_POLL_FAILURES = 5;
 const GO_HTML = '<span class="go-spark" aria-hidden="true">✦</span><span class="go-text">开始生成</span><kbd class="go-kbd">Ctrl ↵</kbd>';
 
-const DARKROOM_STAGES = [
-  { at: 0, text: "潜空间初始化 · 构思构图" },
-  { at: 3, text: "扩散去噪采样 · 光影凝聚" },
-  { at: 7, text: "纹理细节显影 · 银盐沉淀" },
-  { at: 12, text: "色彩校正调优 · 成片定影" }
-];
+const PENDING_TASK_KEY = "shiguang.pending-task.v1";
+let pendingTask = null;
 
-function getDarkroomStageText(secondsElapsed, targetImages, currentCount) {
-  const stage = [...DARKROOM_STAGES].reverse().find(s => secondsElapsed >= s.at) || DARKROOM_STAGES[0];
-  if (targetImages > 1) {
-    return `[${currentCount}/${targetImages}] ${stage.text}`;
-  }
-  return stage.text;
+function rememberTask(task) {
+  pendingTask = task;
+  try {
+    if (task) sessionStorage.setItem(PENDING_TASK_KEY, JSON.stringify(task));
+    else sessionStorage.removeItem(PENDING_TASK_KEY);
+  } catch { /* The current page still holds its task when browser storage is unavailable. */ }
 }
+
+function showTaskState(state, text) {
+  const strip = $("task-strip");
+  strip.hidden = false;
+  strip.dataset.state = state;
+  if ($("task-summary").textContent !== text) $("task-summary").textContent = text;
+  $("task-stop").hidden = state !== "running" || !currentTaskId;
+  $("task-stop").disabled = $("go").disabled;
+  $("task-reconnect").hidden = state !== "offline";
+  $("task-dismiss").hidden = state === "running" || state === "offline";
+}
+$("task-dismiss").addEventListener("click", () => { $("task-strip").hidden = true; });
+$("task-stop").addEventListener("click", cancelCurrentTask);
+$("task-reconnect").addEventListener("click", resumePendingTask);
 
 function makeDevelopingCard(label) {
   const card = document.createElement("div");
@@ -1722,8 +1799,8 @@ function makeDevelopingCard(label) {
   const devCap = capabilityFor(modelInput?.value || "");
   const [w, h] = (devCap.size_mode === "none" ? "1024x1024" : currentSize()).split("x");
   card.innerHTML = `
-    <div class="developing" style="aspect-ratio:${w}/${h}">
-      <div class="red-lamp"></div>
+    <div class="developing" style="--developing-ratio:${w}/${h}">
+      <div class="red-lamp" aria-hidden="true"></div>
       <div class="dev-label">${label}</div>
       <div class="dev-time">0s</div>
     </div>`;
@@ -1734,24 +1811,40 @@ function setGoIdle() {
   busy = false;
   $("go").disabled = false;
   $("go").innerHTML = GO_HTML;
-  if (editSource) $("go").querySelector(".go-text").textContent = "生成改图";
+  if (pendingTask) $("go").querySelector(".go-text").textContent = "重新连接任务";
+  else if (editSource) $("go").querySelector(".go-text").textContent = "生成改图";
   $("edit-cancel").disabled = false;
 }
 
 function updateGalleryEmpty() {
   const hasImages = Boolean(wallItems.length || $("gallery").querySelector(".print-developing"));
-  $("empty").hidden = hasImages || onlyFinal;
-  $("empty-final").hidden = hasImages || !onlyFinal;
+  const filtered = Boolean($("f-q").value.trim() || $("f-model").value || $("f-provider").value || $("f-range").value !== "all" || onlyFav);
+  $("empty").hidden = hasImages || onlyFinal || filtered;
+  $("empty-final").hidden = hasImages || !onlyFinal || filtered;
+  $("empty-filter").hidden = hasImages || !filtered;
 }
 
 function appendGeneratedImages(images) {
   if (page !== 1 || filterQuery()) return;
+  const gallery = $("gallery");
+  const pending = gallery.querySelector(".print-developing");
   const fresh = images.filter((item) => item.name && !wallItems.some((existing) => existing.name === item.name));
   for (const item of fresh) {
     const card = makeCard(item, true);
     card.querySelector("img").classList.add("develop");
-    $("gallery").prepend(card);
+    if (pending) pending.after(card);
+    else gallery.prepend(card);
     wallItems.unshift(item);
+  }
+}
+
+async function withTaskControlTimeout(request) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), TASK_CONTROL_TIMEOUT_MS);
+  try {
+    return await request(controller.signal);
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
@@ -1761,48 +1854,71 @@ async function cancelCurrentTask() {
   setGenMsg("正在取消，当前这张出完就停…");
   $("go").disabled = true;
   $("go").innerHTML = "正在取消…";
+  $("task-stop").disabled = true;
   try {
-    const r = await fetch("/api/task/cancel", {
+    const r = await withTaskControlTimeout((signal) => fetch("/api/task/cancel", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id }),
-    });
+      signal,
+    }));
     if (!r.ok) throw new Error("取消请求失败");
   } catch {
     if (currentTaskId !== id) return;
     $("go").disabled = false;
     $("go").textContent = "取消本次生成";
-    setGenMsg("取消请求发送失败，可以再次尝试取消");
+    setGenMsg("未能确认取消请求，可以再次尝试取消");
+    showTaskState("running", "取消请求尚未确认，可以再次取消");
   }
 }
 
-function taskLabel(t, targetImages, seconds) {
-  if (t.status === "cancelling") return "正在取消…";
-  return getDarkroomStageText(seconds, targetImages, t.image_count || 0);
+function taskLabel(t, targetImages) {
+  if (t.status === "cancelling") return "取消中，正在等待已发出的请求结束";
+  if (t.status === "queued") return "等待队列调度";
+  return `正在生成 · 已收到 ${t.image_count || 0} / ${targetImages} 张`;
 }
 
 async function runTask(options, card, n, onImages) {
   const r = await fetch("/api/generate-task", options);
   const d = await r.json();
   if (!r.ok || !d.task_id) throw new Error(d.error || "无法创建生成任务");
-  currentTaskId = d.task_id;
+  const task = { id: d.task_id, target: d.target_images || d.target_n || n || 1, started: Date.now() };
+  rememberTask(task);
+  return watchTask(task, card, onImages);
+}
+
+async function watchTask(task, card, onImages) {
+  currentTaskId = task.id;
   $("go").textContent = "取消本次生成";
   $("go").disabled = false;
   const labelEl = card.querySelector(".dev-label");
-  const targetImages = d.target_images || d.target_n || n || 1;
+  const targetImages = task.target;
   let rendered = 0;
-  const taskStart = Date.now();
+  let pollFailures = 0;
   while (true) {
     await new Promise((resolve) => setTimeout(resolve, 800));
     let t;
     try {
-      const status = await fetch(`/api/task?id=${encodeURIComponent(d.task_id)}`);
-      if (status.status === 404) t = { status: "missing" };
-      else if (status.ok) t = await status.json();
+      t = await withTaskControlTimeout(async (signal) => {
+        const status = await fetch(`/api/task?id=${encodeURIComponent(task.id)}`, { signal });
+        if (status.status === 404) return { status: "missing" };
+        return status.ok ? status.json() : null;
+      });
     } catch { /* 短暂断线后重新查询同一个任务 */ }
-    if (!t) continue;
-    if (t.status === "missing") throw new Error("任务状态已失效，已保存的图片可在画廊中查看");
-    const curSec = Math.round((Date.now() - taskStart) / 1000);
-    const newText = taskLabel(t, targetImages, curSec);
+    if (!t?.status) {
+      if (++pollFailures >= MAX_TASK_POLL_FAILURES) {
+        throw new Error("暂时无法查询进度。重新连接可继续跟踪原任务");
+      }
+      continue;
+    }
+    pollFailures = 0;
+    if (t.status === "missing") {
+      rememberTask(null);
+      throw new Error("任务记录已失效，已生成的作品可在作品库查看");
+    }
+    const newText = taskLabel(t, targetImages);
+    card.querySelector(".dev-time").textContent = Math.round((Date.now() - task.started) / 1000) + "s";
+    if (t.status === "cancelling") $("go").disabled = true;
+    showTaskState("running", newText);
     if (labelEl && labelEl.textContent !== newText) {
       labelEl.textContent = newText;
     }
@@ -1812,12 +1928,53 @@ async function runTask(options, card, n, onImages) {
       onImages(freshImgs);
       rendered = t.images.length;
     }
-    if (["done", "failed", "cancelled"].includes(t.status)) return t;
+    if (["done", "failed", "cancelled"].includes(t.status)) {
+      rememberTask(null);
+      return t;
+    }
+  }
+}
+
+function reportTaskResult(result) {
+  const count = (result.images || []).length;
+  const message = result.status === "cancelled" ? `已取消，保留 ${count} 张作品`
+    : result.status === "failed" ? `生成失败：${result.errors?.[0]?.error || "服务未返回图片"}`
+    : result.notice || `完成 ${count} 张${result.elapsed ? " · 耗时 " + result.elapsed + "s" : ""}`;
+  setGenMsg(message);
+  showTaskState(result.status === "failed" ? "error" : "done", message);
+}
+
+function reportTaskError(error) {
+  setGenMsg("出错：" + error.message);
+  showTaskState(pendingTask ? "offline" : "error", error.message);
+}
+
+async function resumePendingTask() {
+  if (busy || !pendingTask) return;
+  busy = true;
+  $("edit-cancel").disabled = true;
+  const card = makeDevelopingCard("正在连接原任务");
+  $("gallery").prepend(card);
+  updateGalleryEmpty();
+  showTaskState("running", "正在连接原任务…");
+  try {
+    const result = await watchTask(pendingTask, card, appendGeneratedImages);
+    reportTaskResult(result);
+  } catch (error) {
+    reportTaskError(error);
+  } finally {
+    card.remove();
+    currentTaskId = null;
+    hideProgress();
+    setGoIdle();
+    updateGalleryEmpty();
+    loadHistory(page, false);
   }
 }
 
 async function gen() {
   if (busy) return;
+  if (pendingTask) { await resumePendingTask(); return; }
   const submittedEdit = editSource;
   const prompt = submittedEdit ? "" : $("prompt").value.trim();
   const change = submittedEdit ? $("edit-change").value.trim() : "";
@@ -1848,6 +2005,10 @@ async function gen() {
   }
   const n = submittedEdit ? 1 : currentN();
   const submittedReferences = submittedEdit ? [] : [...referenceFiles];
+  if (submittedReferences.length && !cap.image_to_image) {
+    setGenMsg("当前模型不支持参考图，请移除参考图或切换模型");
+    return;
+  }
 
   // 触发相机快门声
   playShutterSound();
@@ -1857,28 +2018,17 @@ async function gen() {
   $("edit-cancel").disabled = true;
   setGenMsg("");
   const useQueue = n > 1 || Boolean(submittedEdit);
-  const card = makeDevelopingCard(DARKROOM_STAGES[0].text);
+  window.studioGenerationStarted?.();
+  const card = makeDevelopingCard("等待生图服务返回");
   $("gallery").prepend(card);
   updateGalleryEmpty();
   enterCard(card);
   const timeEl = card.querySelector(".dev-time");
-  const labelEl = card.querySelector(".dev-label");
+  showTaskState("running", `${model} · 已提交 ${n} 张，正在等待结果`);
   const t0 = Date.now();
   const timer = setInterval(() => {
     const elapsed = Math.round((Date.now() - t0) / 1000);
     timeEl.textContent = `${elapsed}s`;
-    if (useQueue) return;
-    const stageTxt = getDarkroomStageText(elapsed, n, 0);
-    if (labelEl && labelEl.textContent !== stageTxt) {
-      if (gsapOK) {
-        gsap.to(labelEl, { opacity: 0.5, y: -2, duration: 0.15, onComplete: () => {
-          labelEl.textContent = stageTxt;
-          gsap.to(labelEl, { opacity: 1, y: 0, duration: 0.2, ease: "power1.out" });
-        }});
-      } else {
-        labelEl.textContent = stageTxt;
-      }
-    }
   }, 500);
   showProgress(0, n);
 
@@ -1929,12 +2079,9 @@ async function gen() {
       setEditSource(null);
       openCompareModal(submittedEdit, images[0], true);
     }
-    if (result.status === "cancelled") setGenMsg(`已取消：本次共出图 ${images.length} 张`);
-    else if (result.status === "failed") setGenMsg(`生成失败：${result.errors?.[0]?.error || "未知错误"}`);
-    else if (result.notice) setGenMsg(result.notice);
-    else setGenMsg(`完成 ${images.length} 张${useQueue ? "" : ` · 耗时 ${result.elapsed}s`}`);
+    reportTaskResult(result);
   } catch (e) {
-    setGenMsg("出错：" + e.message);
+    reportTaskError(e);
   } finally {
     card.remove();
     currentTaskId = null;
@@ -1959,21 +2106,30 @@ const MIN_SCALE = 0.2, MAX_SCALE = 10;
 function applyTransform(instant = false) {
   lbImg.style.transition = instant ? "none" : "";
   lbImg.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+  stage.classList.toggle("zoomed", scale > 1);
   $("zoom-level").textContent = `${Math.round(scale * 100)}%`;
   updateMinimap();
 }
 
-function resetZoom() { scale = 1; tx = 0; ty = 0; applyTransform(); }
+function resetZoom() {
+  stopPan();
+  stopInertia();
+  scale = 1;
+  tx = 0;
+  ty = 0;
+  applyTransform();
+}
 
 function clampPan() {
-  const r = lbImg.getBoundingClientRect();
-  if (r.width <= stage.clientWidth) tx = 0;
-  else tx = Math.max(stage.clientWidth - r.width, Math.min(0, tx));
-  if (r.height <= stage.clientHeight) ty = 0;
-  else ty = Math.max(stage.clientHeight - r.height, Math.min(0, ty));
+  // 图片居中缩放，任一方向的可移动距离是溢出量的一半。
+  const maxX = Math.max(0, (lbImg.offsetWidth * scale - stage.clientWidth) / 2);
+  const maxY = Math.max(0, (lbImg.offsetHeight * scale - stage.clientHeight) / 2);
+  tx = Math.max(-maxX, Math.min(maxX, tx));
+  ty = Math.max(-maxY, Math.min(maxY, ty));
 }
 
 function zoomAt(clientX, clientY, factor) {
+  stopInertia();
   const rect = stage.getBoundingClientRect();
   const cx = clientX - rect.left - rect.width / 2 - tx;
   const cy = clientY - rect.top - rect.height / 2 - ty;
@@ -2001,7 +2157,7 @@ function zoomAtCenter(factor) {
 }
 
 /* 平移带惯性物理滑动 (Smooth Pan with Inertia) */
-let panning = false, lastX = 0, lastY = 0;
+let panPointer = null, lastX = 0, lastY = 0;
 let vx = 0, vy = 0;
 let lastMoveTime = 0;
 let inertiaRaf = null;
@@ -2010,19 +2166,30 @@ function stopInertia() {
   if (inertiaRaf) { cancelAnimationFrame(inertiaRaf); inertiaRaf = null; }
 }
 
+function stopPan() {
+  if (panPointer === null) return;
+  const pointer = panPointer;
+  panPointer = null;
+  stage.classList.remove("panning");
+  lbImg.classList.remove("dragging");
+  const target = lbImg.hasPointerCapture(pointer) ? lbImg : stage;
+  if (target.hasPointerCapture(pointer)) target.releasePointerCapture(pointer);
+}
+
 stage.addEventListener("pointerdown", (e) => {
-  if (scale <= 1) return;
+  if (scale <= 1 || e.button !== 0 || panPointer !== null || e.target.closest(".lb-nav, .lb-minimap")) return;
   stopInertia();
-  panning = true; lastX = e.clientX; lastY = e.clientY;
+  panPointer = e.pointerId;
+  lastX = e.clientX; lastY = e.clientY;
   lastMoveTime = performance.now();
   vx = 0; vy = 0;
   stage.classList.add("panning");
   lbImg.classList.add("dragging");
-  stage.setPointerCapture(e.pointerId);
+  e.target.setPointerCapture(e.pointerId);
 });
 
 stage.addEventListener("pointermove", (e) => {
-  if (!panning) return;
+  if (panPointer !== e.pointerId) return;
   const now = performance.now();
   const dt = Math.max(1, now - lastMoveTime);
   const dx = e.clientX - lastX;
@@ -2038,18 +2205,21 @@ stage.addEventListener("pointermove", (e) => {
   applyTransform(true);
 });
 
-stage.addEventListener("pointerup", () => {
-  if (!panning) return;
-  panning = false;
-  stage.classList.remove("panning");
-  lbImg.classList.remove("dragging");
+stage.addEventListener("lostpointercapture", (e) => {
+  if (panPointer === e.pointerId) stopPan();
+});
+
+stage.addEventListener("pointerup", (e) => {
+  if (panPointer !== e.pointerId) return;
+  stopPan();
 
   const speed = Math.hypot(vx, vy);
-  if (speed > 0.08) {
+  if (!reduceMotion && speed > 0.08 && performance.now() - lastMoveTime < 100) {
     let curVx = vx * 16;
     let curVy = vy * 16;
     const friction = 0.92;
     function stepInertia() {
+      inertiaRaf = null;
       if (Math.hypot(curVx, curVy) < 0.2) return;
       tx += curVx;
       ty += curVy;
@@ -2093,8 +2263,8 @@ function updateMinimap() {
     const nh = lbImg.naturalHeight;
     const maxW = 120, maxH = 80;
     const r = Math.min(maxW / nw, maxH / nh);
-    const cw = Math.round(nw * r);
-    const ch = Math.round(nh * r);
+    const cw = Math.max(1, Math.round(nw * r));
+    const ch = Math.max(1, Math.round(nh * r));
     if (canvas.width !== cw || canvas.height !== ch) {
       canvas.width = cw;
       canvas.height = ch;
@@ -2110,8 +2280,8 @@ function updateMinimap() {
     const ih = lbImg.offsetHeight * scale;
     if (iw <= 0 || ih <= 0) return;
 
-    const x0 = (sw / 2 - tx - iw / 2);
-    const y0 = (sh / 2 - ty - ih / 2);
+    const x0 = (sw - iw) / 2 + tx;
+    const y0 = (sh - ih) / 2 + ty;
     const nx0 = Math.max(0, -x0 / iw);
     const ny0 = Math.max(0, -y0 / ih);
     const nx1 = Math.min(1, (sw - x0) / iw);
@@ -2137,6 +2307,7 @@ function initMinimapRadar() {
   const onMinimapClick = (e) => {
     const rect = canvas.getBoundingClientRect();
     if (!rect.width || !rect.height) return;
+    stopInertia();
     const nx = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
     const ny = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
 
@@ -2308,8 +2479,7 @@ function moveLightbox(offset) {
 }
 
 function openLightboxItem(item) {
-  lightboxEl.classList.remove("closing");
-  lightboxEl.hidden = false;
+  showOverlay(lightboxEl, $("lb-close"));
   showLightboxItem(item);
   if (gsapOK) gsap.from(lightboxEl.querySelector(".frame"), { y: 18, autoAlpha: 0, duration: 0.3, ease: "power2.out", clearProps: "all" });
 }
@@ -2319,6 +2489,8 @@ function openLightbox(url, name) {
 }
 
 function closeLightbox() {
+  stopPan();
+  stopInertia();
   closeOverlayAnimated(lightboxEl, () => {
     lbItem = null;
     lbImg.src = "";
@@ -2335,8 +2507,7 @@ lightboxEl.addEventListener("click", (e) => { if (e.target === lightboxEl) close
 function openShortcutsModal() {
   const modal = $("shortcuts-modal");
   if (!modal) return;
-  modal.classList.remove("closing");
-  modal.hidden = false;
+  showOverlay(modal, $("shortcuts-close"));
   if (gsapOK) {
     gsap.from(".shortcuts-frame", { y: 20, autoAlpha: 0, duration: 0.32, ease: "power2.out", clearProps: "all" });
   }
@@ -2349,6 +2520,7 @@ function closeShortcutsModal() {
 }
 
 document.addEventListener("keydown", (e) => {
+  if (document.querySelector("dialog[open]") || e.defaultPrevented) return;
   if (e.key === "Escape") {
     if (!$("shortcuts-modal")?.hidden) closeShortcutsModal();
     else if (!$("compare-modal")?.hidden) closeCompareModal();
@@ -2366,6 +2538,7 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "/" && !["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName)) {
     if (!lightboxEl.hidden || !settingsEl.hidden || !$("compare-modal")?.hidden || !$("shortcuts-modal")?.hidden) return;
     e.preventDefault();
+    window.closeStudioComposer?.();
     $("f-q")?.focus();
     return;
   }
@@ -2431,6 +2604,7 @@ $("lb-edit").addEventListener("click", () => {
   }
   setEditSource(lbItem);
   closeLightbox();
+  window.openStudioComposer?.(false);
   if (document.body.classList.contains("rail-collapsed")) setRailCollapsed(false);
   $("edit-change").focus();
 });
@@ -2578,10 +2752,8 @@ function openCompareModal(itemA = null, itemB = null, review = false) {
   setCompareMode(cmpReview && !cmpItemA ? "side" : "split");
   setCompareSplit(50);
 
-  modal.classList.remove("closing");
-  modal.hidden = false;
+  showOverlay(modal, $("compare-close"));
   modal.querySelector(".compare-frame").scrollTop = 0;
-  $("compare-close").focus({ preventScroll: true });
 
   if (gsapOK) {
     gsap.from(".compare-frame", { y: 24, autoAlpha: 0, duration: 0.35, ease: "power2.out", clearProps: "all" });
@@ -2973,18 +3145,6 @@ document.querySelectorAll(".mt-tag").forEach((btn) => {
   });
 });
 
-/* 空态启发词卡片 */
-document.querySelectorAll(".es-pill").forEach((pill) => {
-  pill.addEventListener("click", () => {
-    const p = pill.dataset.prompt;
-    if (p) {
-      setPrompt(p);
-      $("prompt").focus();
-      showToast("已载入灵感构思 ✦", "success");
-    }
-  });
-});
-
 /* 搜索框清除按钮 */
 const searchInput = $("f-q");
 const searchClearBtn = $("search-clear-btn");
@@ -3090,7 +3250,9 @@ function setRailCollapsed(collapsed) {
     gsap.from(".rail", { x: -30, opacity: 0.7, duration: 0.3, ease: "power2.out", clearProps: "all" });
   }
 }
-$("rail-collapse-btn")?.addEventListener("click", () => setRailCollapsed(true));
+$("rail-collapse-btn")?.addEventListener("click", () => {
+  if (!matchMedia("(max-width: 980px)").matches) setRailCollapsed(true);
+});
 $("rail-expand-btn")?.addEventListener("click", () => setRailCollapsed(false));
 if (lsGet(RAIL_COLLAPSED_KEY, false)) {
   setRailCollapsed(true);
@@ -3121,4 +3283,11 @@ initNegativePromptAndProParams();
 initCompareTool();
 initMinimapRadar();
 initShortcutsModal();
-loadHistory(1);
+loadHistory(1, false);
+try {
+  const storedTask = JSON.parse(sessionStorage.getItem(PENDING_TASK_KEY));
+  if (storedTask && /^[a-zA-Z0-9_-]{1,64}$/.test(storedTask.id) && Number.isFinite(storedTask.started) && Number.isFinite(storedTask.target)) {
+    pendingTask = storedTask;
+    resumePendingTask();
+  }
+} catch { /* Invalid or unavailable tab storage has no effect on new work. */ }
