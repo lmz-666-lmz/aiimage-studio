@@ -4,7 +4,7 @@
   <p><b>为你量身打造的本地优先 · 个人 AI 生图工作台与灵感画廊</b><br>聚合各路 API Key · 多模型调度 · 一条提示词多张出图 · 元数据追溯 · 零 GPU / Node 依赖</p>
   <p>
     <a href="https://github.com/lmz-666-lmz/ai-image-studio"><img src="https://img.shields.io/badge/GitHub-Repo-181717.svg?logo=github" alt="GitHub"></a>
-    <img src="https://img.shields.io/badge/Version-v1.3.0-e2ad62.svg" alt="v1.3.0">
+    <img src="https://img.shields.io/badge/Version-v1.4.0-e2ad62.svg" alt="v1.4.0">
     <img src="https://img.shields.io/badge/License-MIT-2ea44f.svg" alt="MIT">
     <img src="https://img.shields.io/badge/Python-3.10+-3776ab.svg?logo=python" alt="Python 3.10+">
     <img src="https://img.shields.io/badge/GPU-Not%20Required-8e7cc3.svg" alt="No GPU required">
@@ -12,7 +12,7 @@
   <p><b>中文</b> · <a href="README_EN.md">English</a> ｜ 作者 / Author: <a href="https://github.com/lmz-666-lmz">lmz-666-lmz</a></p>
 
   <img src="screenshots/wall-darkroom.png" alt="拾光主界面 · 暮金主题" width="100%">
-<sub>暮金 darkroom · 瀑布流历史墙 · 三步式生图面板 · 收藏与批量管理</sub>
+<sub>暮金主题 · 生图面板、本地图库与成稿筛选</sub>
 </div>
 
 ---
@@ -29,7 +29,7 @@
 | 好图散落在平台网页里，prompt 找不到、参数复现不了 | 本地图库，每张图带同名 JSON 追溯（prompt / 模型 / 尺寸 / 耗时 / 线路），可收藏、批量管理、一键导出 |
 | 想用 API 生图，但重型工具要 GPU、要装一堆依赖 | 仅 Flask 一个依赖，`python app.py` 即开即用 |
 | 想一批想法连试，表单要一次次重复提交 | 一条提示词可选 1-4 张，逐张上屏、进度可见、可随时取消 |
-| 担心第三方工具上传密钥和作品 | 只监听 `127.0.0.1`，密钥与图片全程留在本机，设置接口也不向前端返回完整密钥 |
+| 想自己管理密钥和作品 | 默认只监听 `127.0.0.1`，配置与图库保存在本机，设置接口不会向前端返回完整密钥 |
 
 ### 亮点
 
@@ -46,12 +46,16 @@
     <td width="50%" align="center"><img src="screenshots/wall-ink.png" alt="黛夜主题"><br><sub><b>黛夜</b> · ink</sub></td>
     <td width="50%" align="center"><img src="screenshots/wall-paper.png" alt="宣纸主题"><br><sub><b>宣纸</b> · paper</sub></td>
   </tr>
+</table>
+<table>
   <tr>
     <td width="33%" align="center"><img src="screenshots/settings-providers.png" alt="中转站设置"><br><sub><b>中转站设置</b><br>多站管理 · 健康检测</sub></td>
     <td width="33%" align="center"><img src="screenshots/generating.png" alt="显影动画"><br><sub><b>显影动画</b><br>红光扫过 · 实时计时</sub></td>
     <td width="33%" align="center"><img src="screenshots/lightbox-info.png" alt="灯箱"><br><sub><b>灯箱</b><br>缩放平移 · 参数追溯 · 收藏</sub></td>
   </tr>
 </table>
+<img src="screenshots/edit-review.png" alt="改图验收台 · 原图和新版本并排对比" width="100%">
+<br><sub>A/B 对比与改图验收 · 示例图库与模拟线路</sub>
 </div>
 
 ## 🚀 快速开始
@@ -139,10 +143,13 @@ python app.py                     # 自动打开 http://127.0.0.1:7860
 - `runtime_state.json`：健康检测等运行时状态，自动创建、可安全删除重建。
 - 三者与 `config.json` 均已加入 `.gitignore`。
 
-## 🎛 v1.3.0 功能清单
+## 🎛 v1.4.0 功能清单
 
 | 功能 | 说明 |
 |---|---|
+| **改图版本与验收** | 灯箱点「基于此图改一版」，填写要改和要保留的内容。生成后进 A/B 对比台逐项验收，全部通过可标记成稿。原图关系与验收结果保存在本地，可从灯箱继续改图，或用图库的「成稿」筛选找回。 |
+| **A/B 对比与创作辅助** | 支持滑块、并排和差值对比。提示词工坊提供光影、镜头与风格预设，灯箱提供取色、缩放导航和参数复用。 |
+| **按需发送扩展参数** | 反向提示词、Seed 和 CFG 默认不发送。在线路和模型支持时按需开启，图库保存的是请求值。 |
 | **模型能力自动适配** | 按模型族动态显示画幅、质量、背景、风格、数量和参考图入口；发送前过滤不支持的字段，避免上游 400。侧栏「本次将发送」实时列出真正会发出去的参数。 |
 | **数量真实生效** | 官方 `gpt-image` / `gemini image` / `grok image` 一次只返回 1 张，选择多张时自动分次补齐；支持一次多图的模型（`dall-e` / `seedream` / `flux`）先整批请求，返回不足再补齐。张数不足会如实提示，补齐中途失败也保留已出的图。 |
 | **多参考图 / 图生图** | 最多 4 张 PNG / JPEG / WEBP；单张用 `image` 字段，多张按官方约定用 `image[]`。 |
@@ -155,6 +162,14 @@ python app.py                     # 自动打开 http://127.0.0.1:7860
 | **上游报错直译** | 生成失败时附上中转站返回的具体原因（`error.message` 等关键信息），不再只有一串 HTTP 状态码，排障不用再猜。 |
 | **安全故障切换** | 仅 401 / 403 / 404 / 429 / 502 / 503 / 504 或明确连接失败时切换一次同模型备用站；不确定超时不重试；补齐轮不再切换，避免同组图片风格跳变。 |
 | **本地历史与三套主题** | 瀑布流、筛选、分页、灯箱、显影动画；内存索引支撑上千张图片不卡顿。 |
+
+<details><summary><b>v1.4.0 相比 v1.3.0 的改进</b></summary>
+
+- 新增改图版本、逐项验收、成稿筛选、A/B 对比、提示词预设和可选暗房音效。
+- 多图任务按已保存的结果更新进度。提交时锁定线路，取消后停止发起后续请求，下载失败的图片不计入成功数。
+- 异步加载模型列表时保留手填模型。复用旧作品时只恢复记录中存在的扩展参数，避免补发默认 CFG。
+
+</details>
 
 <details><summary><b>v1.3.0 相比 v1.2.0 的改进</b></summary>
 
@@ -232,7 +247,7 @@ ai-image-studio/
 
 <details><summary><b>我的 API Key 和图片会上传到别处吗？</b></summary>
 
-不会。拾光只监听 `127.0.0.1`，密钥存在本地 `config.json`，图片存在本地 `outputs/`；请求只发往你配置的中转站。设置接口也不向前端返回完整密钥。
+密钥保存在本地 `config.json`，图库保存在 `outputs/`。生成请求会向你配置的线路发送密钥、提示词和本次使用的参考图，设置接口不会向浏览器返回完整密钥。应用默认监听 `127.0.0.1`。
 </details>
 
 <details><summary><b>为什么某个模型没有质量 / 背景参数？</b></summary>
@@ -247,7 +262,7 @@ ai-image-studio/
 
 <details><summary><b>为什么生成失败没有自动换站？</b></summary>
 
-备用线路默认关闭，且只对明确线路故障切换一次；400 / 401 / 403 和不确定超时不重试，避免重复生成与重复计费。备用站还必须缓存有相同模型。
+备用线路默认关闭。开启后，401 / 403 / 404 / 429 / 502 / 503 / 504 或明确连接失败才会尝试切换一次，且备用站必须缓存同名模型。400 和不确定超时不会触发切换。
 </details>
 
 <details><summary><b>健康检测会扣费吗？</b></summary>
@@ -262,4 +277,4 @@ ai-image-studio/
 
 ---
 
-MIT License · AI Image Studio · 拾光 · v1.3.0
+MIT License · AI Image Studio · 拾光 · v1.4.0

@@ -13,22 +13,32 @@
 </head>
 <body>
 
-<aside class="rail">
+<aside class="rail" id="studio-rail" aria-label="创作控制面板">
   <header class="brand">
     <div class="brand-top">
       <div class="brand-title-wrap">
-        <div class="brand-logo-gem">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <div class="brand-logo-gem" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <polygon points="12 2 2 7 12 12 22 7 12 2"/>
             <polyline points="2 17 12 22 22 17"/>
             <polyline points="2 12 12 17 22 12"/>
           </svg>
         </div>
         <h1><span id="app-name">拾光</span><span class="lamp" aria-hidden="true"></span></h1>
-        <span class="brand-pill">STUDIO 2.0</span>
+        <span class="brand-pill" id="brand-version" hidden></span>
+        <span class="brand-pro-badge" id="pro-badge" title="PRO 旗舰暗房工作室版"><span class="pro-dot"></span>PRO</span>
       </div>
 
       <div class="brand-actions">
+        <!-- 沉浸暗房音效与环境音切换按钮 -->
+        <button id="sound-toggle" class="gear sound-toggle-btn" type="button" title="沉浸暗房环境音与快门声 (点击开启/关闭)" aria-label="暗房音效" aria-pressed="false">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+            <path class="sound-wave-1" d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+            <path class="sound-wave-2" d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+          </svg>
+        </button>
+
         <!-- 顶部快捷主题切换胶囊 -->
         <div class="quick-themes" role="radiogroup" aria-label="快捷切换色彩主题">
           <button class="theme-btn quick-theme-dot" data-theme="darkroom" title="暮金 · 暗房琥珀黑金" aria-label="暮金主题"></button>
@@ -36,10 +46,20 @@
           <button class="theme-btn quick-theme-dot" data-theme="paper" title="宣纸 · 典雅素帛丹砂" aria-label="宣纸主题"></button>
         </div>
 
-        <button id="open-settings" class="gear" title="打开工作室设置" aria-label="设置">
+        <button id="open-shortcuts" class="gear" title="快捷键速查 (?)" aria-label="快捷键速查" onclick="document.getElementById('shortcuts-modal').hidden = false">
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+          </svg>
+        </button>
+        <button id="open-settings" class="gear" title="打开工作室设置" aria-label="打开工作室设置">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <circle cx="12" cy="12" r="3.2"/>
             <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34h.09a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87v.09a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1z"/>
+          </svg>
+        </button>
+        <button id="rail-collapse-btn" class="gear rail-collapse-btn" title="收起创作侧栏" aria-label="收起创作侧栏">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m16 15-3-3 3-3"/>
           </svg>
         </button>
       </div>
@@ -92,21 +112,25 @@
   </div>
 
   <!-- 1 提示词工坊：整段文字 = 一张图，多张由下面的「数量」决定 -->
-  <section class="step">
+  <section class="step" id="prompt-workshop" aria-labelledby="step-1-title">
     <div class="step-head">
       <div class="step-no-badge">
         <span class="step-no">01</span>
       </div>
-      <span class="step-title">提示词工坊</span>
+      <span class="step-title" id="step-1-title">提示词工坊</span>
       <span class="step-meta" id="prompt-meta">0 字</span>
       <div class="prompt-tools">
         <button id="prompt-dice" class="mini-tool-btn" type="button" title="灵感骰子 · 随机注入艺术构思">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><path d="M12 8v.01"/><path d="M8 12v.01"/><path d="M16 12v.01"/><path d="M12 16v.01"/></svg>
           <span>灵感</span>
         </button>
-        <button id="prompt-magic" class="mini-tool-btn" type="button" title="风格修饰 · 快速追加艺术标签">
+        <button id="prompt-magic" class="mini-tool-btn" type="button" title="常用修饰 · 快速追加艺术修饰标签">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/></svg>
           <span>修饰</span>
+        </button>
+        <button id="prompt-matrix-btn" class="mini-tool-btn" type="button" title="专业预设工坊 · 镜头/光影/风格/引擎大师矩阵">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+          <span>矩阵</span>
         </button>
         <button id="prompt-clear" class="mini-btn prompt-clear-btn" type="button" title="清空提示词">清空</button>
       </div>
@@ -129,10 +153,141 @@
       </div>
     </div>
 
+    <!-- Pro Style & Camera Preset Matrix 抽屉 (#style-preset-matrix) -->
+    <div id="style-preset-matrix" class="style-preset-matrix" hidden>
+      <div class="spm-head">
+        <div class="spm-title-row">
+          <span class="spm-badge">PRESET MATRIX</span>
+          <span class="spm-title">大师级画风与光影摄影矩阵</span>
+        </div>
+        <button id="spm-close-btn" class="spm-close-btn" type="button" title="收起矩阵" aria-label="收起预设矩阵">×</button>
+      </div>
+      <div class="spm-tabs" role="tablist" aria-label="专业预设分类">
+        <button class="spm-tab active" type="button" role="tab" id="spm-tab-lighting" aria-selected="true" data-tab="lighting">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+          <span>光影 Lighting</span>
+        </button>
+        <button class="spm-tab" type="button" role="tab" id="spm-tab-camera" aria-selected="false" data-tab="camera">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+          <span>镜头 Camera</span>
+        </button>
+        <button class="spm-tab" type="button" role="tab" id="spm-tab-style" aria-selected="false" data-tab="style">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/></svg>
+          <span>风格 Aesthetics</span>
+        </button>
+        <button class="spm-tab" type="button" role="tab" id="spm-tab-engine" aria-selected="false" data-tab="engine">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+          <span>渲染引擎 Engines</span>
+        </button>
+        <button class="spm-tab" type="button" role="tab" id="spm-tab-artists" aria-selected="false" data-tab="artists">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 2 4 4-10 10H8v-4L18 2z"/><path d="m14 6 4 4"/></svg>
+          <span>艺术大师 Artists</span>
+        </button>
+      </div>
+
+      <div class="spm-panels">
+        <!-- 1. 光影 Lighting -->
+        <div class="spm-panel active" id="spm-panel-lighting" role="tabpanel" aria-labelledby="spm-tab-lighting">
+          <div class="preset-chip-grid">
+            <button type="button" class="preset-chip" data-preset="丁达尔神光，穿透性大气体积光束，微尘光晕"><span class="chip-indicator"></span>丁达尔神光</button>
+            <button type="button" class="preset-chip" data-preset="伦勃朗三角光影，戏剧性单侧光，明暗反差古典质感"><span class="chip-indicator"></span>伦勃朗光</button>
+            <button type="button" class="preset-chip" data-preset="电影级冷暖双色侧逆光，蓝橙对比 (Teal &amp; Orange)"><span class="chip-indicator"></span>冷暖青橙光</button>
+            <button type="button" class="preset-chip" data-preset="暮色黄金时刻，温暖柔金斜射阳光，梦幻长阴影"><span class="chip-indicator"></span>黄金时刻</button>
+            <button type="button" class="preset-chip" data-preset="赛博朋克霓虹反光，高饱和度夜色，雨夜地面倒影"><span class="chip-indicator"></span>霓虹夜光</button>
+            <button type="button" class="preset-chip" data-preset="自然柔和漫射日光，清透室内自然采光，细腻灰阶过渡"><span class="chip-indicator"></span>柔和漫射光</button>
+            <button type="button" class="preset-chip" data-preset="清冷月华逆光轮廓，银蓝边缘高光，深邃神秘夜景"><span class="chip-indicator"></span>月华轮廓光</button>
+            <button type="button" class="preset-chip" data-preset="戏剧性电影顶光，暗黑高反差剪影，硬朗氛围"><span class="chip-indicator"></span>戏剧顶光</button>
+          </div>
+        </div>
+
+        <!-- 2. 镜头 Camera -->
+        <div class="spm-panel" id="spm-panel-camera" role="tabpanel" aria-labelledby="spm-tab-camera" hidden>
+          <div class="preset-chip-grid">
+            <button type="button" class="preset-chip" data-preset="85mm 黄金人像定焦镜头，f/1.2 超大光圈，迷人奶油虚化背景"><span class="chip-indicator"></span>85mm F1.2 人像</button>
+            <button type="button" class="preset-chip" data-preset="24mm 广角低角度仰拍，强烈透视张力，史诗纵深感"><span class="chip-indicator"></span>24mm 广角低角度</button>
+            <button type="button" class="preset-chip" data-preset="哈苏中画幅相机拍摄，极致细腻微观质感，纯净发色"><span class="chip-indicator"></span>哈苏中画幅</button>
+            <button type="button" class="preset-chip" data-preset="电影级变形宽银幕镜头 (Anamorphic Lens)，水平椭圆光斑"><span class="chip-indicator"></span>变形宽银幕</button>
+            <button type="button" class="preset-chip" data-preset="100mm 微距特写，微观物理细节纤毫毕现，超浅景深"><span class="chip-indicator"></span>百微极致微距</button>
+            <button type="button" class="preset-chip" data-preset="大疆无人机高空航拍鸟瞰视角，宏伟全景构图"><span class="chip-indicator"></span>航拍鸟瞰全景</button>
+            <button type="button" class="preset-chip" data-preset="移轴摄影镜头，微缩模型效果，独特选择性聚焦"><span class="chip-indicator"></span>移轴微缩景观</button>
+            <button type="button" class="preset-chip" data-preset="柯达 Portra 400 胶片颗粒，经典暖色复古胶片影调"><span class="chip-indicator"></span>柯达胶片颗粒</button>
+          </div>
+        </div>
+
+        <!-- 3. 风格 Aesthetics -->
+        <div class="spm-panel" id="spm-panel-style" role="tabpanel" aria-labelledby="spm-tab-style" hidden>
+          <div class="preset-chip-grid">
+            <button type="button" class="preset-chip" data-preset="宋代温润水墨写意，大面积优雅留白，宣纸晕染意境"><span class="chip-indicator"></span>宋韵水墨写意</button>
+            <button type="button" class="preset-chip" data-preset="未来主义东方科幻，机械外骨骼，悬浮飞艇，古风与高科技融合"><span class="chip-indicator"></span>东方科幻未来</button>
+            <button type="button" class="preset-chip" data-preset="极简主义现代禅意构图，干净纯净背景，优雅负空间"><span class="chip-indicator"></span>极简现代禅意</button>
+            <button type="button" class="preset-chip" data-preset="蒸汽朋克复古机械美学，黄铜齿轮，精细蒸汽管道，维多利亚工匠"><span class="chip-indicator"></span>蒸汽朋克机械</button>
+            <button type="button" class="preset-chip" data-preset="浮世绘传统木版画风，浓郁线条轮廓，波浪纹样与古典色块"><span class="chip-indicator"></span>传统浮世绘木版</button>
+            <button type="button" class="preset-chip" data-preset="黑暗哥特奇幻风格，神秘古典大教堂，石雕雕像与暗黑宿命美学"><span class="chip-indicator"></span>黑暗哥特幻想</button>
+            <button type="button" class="preset-chip" data-preset="蒸汽波复古未来 Synthwave，80年代激光网格，紫粉渐变落日"><span class="chip-indicator"></span>蒸汽波 Synthwave</button>
+            <button type="button" class="preset-chip" data-preset="影视概念艺术插画，大片气场，电影级叙事感"><span class="chip-indicator"></span>电影概念艺术</button>
+          </div>
+        </div>
+
+        <!-- 4. 渲染引擎 Engines -->
+        <div class="spm-panel" id="spm-panel-engine" role="tabpanel" aria-labelledby="spm-tab-engine" hidden>
+          <div class="preset-chip-grid">
+            <button type="button" class="preset-chip" data-preset="Unreal Engine 5 实时渲染，Lumen 全局光照，Nanite 几何体，超逼真 8K"><span class="chip-indicator"></span>虚幻引擎5 (UE5)</button>
+            <button type="button" class="preset-chip" data-preset="Octane Render 物理级高精度渲染，精细光线追踪，微表面反射"><span class="chip-indicator"></span>Octane 物理渲染</button>
+            <button type="button" class="preset-chip" data-preset="Redshift 影视级着色，逼真次表面散射 (SSS)，晶莹材质"><span class="chip-indicator"></span>Redshift 影视着色</button>
+            <button type="button" class="preset-chip" data-preset="Blender Cycles 渲染，路径追踪，真实环境光遮蔽 (AO)"><span class="chip-indicator"></span>Blender Cycles</button>
+            <button type="button" class="preset-chip" data-preset="35mm 电影胶片实拍质感，自然银盐噪点颗粒，宽动态范围"><span class="chip-indicator"></span>35mm 银盐胶片</button>
+            <button type="button" class="preset-chip" data-preset="超高物理精度次表面散射 (Subsurface Scattering)，通透玉石/皮肤质感"><span class="chip-indicator"></span>SSS 次表面散射</button>
+            <button type="button" class="preset-chip" data-preset="物理级体积雾，丁达尔光柱，漂浮微粒与烟云大气着色"><span class="chip-indicator"></span>物理体积烟雾</button>
+            <button type="button" class="preset-chip" data-preset="Ray Tracing 光线追踪反射，逼真金属镀铬镜面反射与水面折射"><span class="chip-indicator"></span>Ray Tracing 光追</button>
+          </div>
+        </div>
+
+        <!-- 5. 艺术大师 Artists -->
+        <div class="spm-panel" id="spm-panel-artists" role="tabpanel" aria-labelledby="spm-tab-artists" hidden>
+          <div class="preset-chip-grid">
+            <button type="button" class="preset-chip" data-preset="新海诚风格，澄澈湛蓝天空，积雨云与唯美逆光温润光斑"><span class="chip-indicator"></span>新海诚 (Makoto Shinkai)</button>
+            <button type="button" class="preset-chip" data-preset="吉卜力工作室/宫崎骏手绘动画美学，温暖治愈田园，生机盎然自然色彩"><span class="chip-indicator"></span>吉卜力 / 宫崎骏</button>
+            <button type="button" class="preset-chip" data-preset="克劳德·莫奈印象派，浮光掠影，跳跃斑驳色彩，朦胧睡莲光影"><span class="chip-indicator"></span>克劳德·莫奈 (Monet)</button>
+            <button type="button" class="preset-chip" data-preset="文森特·梵高后印象派风格，浓厚油画笔触肌理，旋转星夜与激情色彩"><span class="chip-indicator"></span>文森特·梵高 (Van Gogh)</button>
+            <button type="button" class="preset-chip" data-preset="Greg Rutkowski 史诗奇幻古典油画风格，厚重笔触与宏大史诗场景"><span class="chip-indicator"></span>Greg Rutkowski</button>
+            <button type="button" class="preset-chip" data-preset="空山基 Hajime Sorayama 风格，极致高光镜面镀铬质感，超现实机械"><span class="chip-indicator"></span>空山基 (Sorayama)</button>
+            <button type="button" class="preset-chip" data-preset="韦斯·安德森 Wes Anderson 电影美学，严苛居中轴对称构图，复古马卡龙配色"><span class="chip-indicator"></span>韦斯·安德森 (Anderson)</button>
+            <button type="button" class="preset-chip" data-preset="萨尔瓦多·达利超现实主义，荒诞梦境空间，流动时钟与奇幻隐喻"><span class="chip-indicator"></span>萨尔瓦多·达利 (Dalí)</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 提示词主输入框 -->
     <div class="prompt-box-wrap">
       <textarea id="prompt" placeholder="描述你构想的艺术画面，支持中英文、长段落，整段即为一张完整图的生成指令… (按 Ctrl+Enter 快速起炉)" spellcheck="false"></textarea>
       <div class="prompt-floating-hint">
         <kbd>Ctrl ↵ 快速生成</kbd>
+      </div>
+    </div>
+
+    <!-- 反向提示词折叠抽屉 (#negative-prompt-section) -->
+    <div class="negative-prompt-section" id="negative-prompt-section">
+      <div class="neg-header">
+        <button class="neg-toggle-btn" id="neg-toggle-btn" type="button" aria-expanded="false" aria-controls="neg-body">
+          <svg class="neg-arrow" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+          <span class="neg-title">反向提示词 · Negative Prompt</span>
+          <span class="neg-badge">在高级参数中启用发送</span>
+        </button>
+        <button class="mini-btn neg-clear-btn" id="neg-clear-btn" type="button" title="清空反向提示词">清空</button>
+      </div>
+      <div class="neg-body" id="neg-body" hidden>
+        <textarea id="negative-prompt" placeholder="输入不希望在画面中出现的元素或缺陷（如：低分辨率、模糊、畸形肢体、多余手指、噪点、水印、残缺构图…）" spellcheck="false" rows="2"></textarea>
+        <div class="negative-tags" role="toolbar" aria-label="快捷排除标签">
+          <span class="neg-tags-label">快捷添加：</span>
+          <button type="button" class="neg-tag" data-neg="低分辨率，低画质，模糊虚焦，粗糙细节">低清模糊</button>
+          <button type="button" class="neg-tag" data-neg="畸形肢体，多余的手指，变异的手，解剖结构错误">畸形肢体</button>
+          <button type="button" class="neg-tag" data-neg="噪点杂色，压缩伪影，颗粒失真">噪点杂色</button>
+          <button type="button" class="neg-tag" data-neg="文字水印，签名Logo，乱码字符">水印签名</button>
+          <button type="button" class="neg-tag" data-neg="过曝死白，欠曝死黑，曝光不均">曝光失衡</button>
+          <button type="button" class="neg-tag" data-neg="面部扭曲，五官崩坏，不对称眼珠">五官扭曲</button>
+          <button type="button" class="neg-tag" data-neg="构图残缺，主体出框，截断肢体">裁剪残缺</button>
+        </div>
       </div>
     </div>
 
@@ -158,13 +313,34 @@
     </div>
   </section>
 
+  <section class="step" id="edit-draft" aria-labelledby="edit-draft-title" hidden>
+    <div class="edit-heading">
+      <span class="step-title" id="edit-draft-title">基于原图改一版</span>
+      <button id="edit-cancel" class="mini-btn" type="button">退出改图</button>
+    </div>
+    <div class="edit-source">
+      <img id="edit-source-image" alt="改图参考原图">
+      <div><strong>参考原图</strong><small id="edit-source-name"></small></div>
+    </div>
+    <p class="edit-hint" id="edit-field-hint">每行一项，出图后逐项验收。</p>
+    <div class="field">
+      <label for="edit-change">要改什么</label>
+      <textarea id="edit-change" rows="2" maxlength="600" placeholder="换成雪景" aria-describedby="edit-field-hint"></textarea>
+    </div>
+    <div class="field">
+      <label for="edit-keep">要保留什么（选填）</label>
+      <textarea id="edit-keep" rows="2" maxlength="600" placeholder="保留杯身 Logo 和颜色" aria-describedby="edit-field-hint"></textarea>
+    </div>
+    <p id="edit-model-note" class="edit-hint" role="status" hidden>请在上方选择支持图生图的模型。</p>
+  </section>
+
   <!-- 2 画面参数：画幅 / 数量 / 高级参数 -->
-  <section class="step">
+  <section class="step" aria-labelledby="step-2-title">
     <div class="step-head">
       <div class="step-no-badge">
         <span class="step-no">02</span>
       </div>
-      <span class="step-title">画面参数</span>
+      <span class="step-title" id="step-2-title">画面参数</span>
       <span class="step-meta" id="capability-label"></span>
     </div>
 
@@ -215,6 +391,44 @@
           <select id="style"><option value="">默认</option><option value="vivid">鲜明</option><option value="natural">自然</option></select>
         </label>
       </div>
+
+      <!-- 专业参数扩展：Seed 种子与 CFG 提示词契合度滑块 -->
+      <div class="pro-param-controls">
+        <label class="param-control-item">
+          <span><input id="send-extension-params" type="checkbox"> 发送已设置的扩展参数</span>
+          <span class="label-note">反向提示词、Seed 和 CFG 需要中转站和模型支持。</span>
+        </label>
+        <div class="param-control-item" id="seed-param-item">
+          <div class="pci-head">
+            <label for="seed-input">随机种子 · Seed</label>
+            <span class="label-note">留空或填 -1 时由线路决定</span>
+          </div>
+          <div class="seed-input-wrap">
+            <input id="seed-input" type="number" placeholder="随机 (-1)" min="-1" max="4294967295" autocomplete="off">
+            <button id="seed-random-btn" class="mini-tool-btn seed-random-btn" type="button" title="重掷新随机种子" aria-label="随机种子">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><path d="M12 8v.01"/><path d="M8 12v.01"/><path d="M16 12v.01"/><path d="M12 16v.01"/></svg>
+              <span>随机</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="param-control-item" id="cfg-param-item">
+          <div class="pci-head">
+            <label for="cfg-slider">提示词契合度 · CFG Scale</label>
+            <span id="cfg-val" class="cfg-badge">7.0</span>
+          </div>
+          <div class="cfg-slider-wrap">
+            <input id="cfg-slider" class="range-slider" type="range" min="1" max="20" step="0.5" value="7.0" aria-label="CFG Scale 提示词契合度">
+            <div class="range-ticks">
+              <span>自由 1.0</span>
+              <span>平衡 7.0</span>
+              <span>严密 20.0</span>
+            </div>
+          </div>
+          <label class="label-note"><input id="send-cfg-scale" type="checkbox"> 发送 CFG</label>
+        </div>
+      </div>
+
       <p id="param-note" class="param-note"></p>
     </details>
   </section>
@@ -235,9 +449,15 @@
   </section>
 </aside>
 
-<main class="wall">
+<main class="wall" id="studio-wall" aria-label="艺术作品陈列馆">
   <!-- 顶部悬浮控制坞 (Studio Command Dock) -->
   <div class="filters" id="filters">
+    <button id="rail-expand-btn" class="rail-expand-dock-btn" title="展开创作侧栏" type="button" aria-label="展开创作侧栏">
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m14 9 3 3-3 3"/>
+      </svg>
+      <span>创作侧栏</span>
+    </button>
     <div class="filter-search-wrap">
       <svg class="search-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
       <input id="f-q" type="text" placeholder="搜索提示词… (按 / 聚焦)" spellcheck="false">
@@ -274,9 +494,15 @@
     </div>
 
     <div class="filter-actions">
+      <!-- 快捷打开 A/B 图像对比 -->
+      <button id="f-compare" class="filter-toggle compare-dock-btn" type="button" aria-pressed="false" title="开启 A/B 画面对比分析台">
+        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/></svg>
+        <span>对比</span>
+      </button>
       <button id="f-fav" class="filter-toggle" type="button" aria-pressed="false" title="只显示已收藏的艺术照片">
         <span class="ft-star">★</span> 收藏
       </button>
+      <button id="f-final" class="filter-toggle" type="button" aria-pressed="false" title="只显示成稿">成稿</button>
       <button id="f-batch" class="filter-toggle" type="button" aria-pressed="false" title="多选批量管理照片">批量管理</button>
       <a id="f-export" href="/api/history/export" class="filter-toggle export-toggle" title="导出全部元数据 JSON" download>
         <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
@@ -290,7 +516,7 @@
 
   <!-- 空态提示：提供即点即试的启发词 -->
   <div id="empty" class="empty">
-    <div class="empty-mark">
+    <div class="empty-mark" aria-hidden="true">
       <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
         <rect width="18" height="18" x="3" y="3" rx="2" ry="2"/>
         <circle cx="9" cy="9" r="2"/>
@@ -308,8 +534,12 @@
       </div>
     </div>
   </div>
+  <div id="empty-final" class="empty" hidden>
+    <p class="empty-title">没有符合筛选条件的成稿</p>
+    <p class="empty-desc">改图通过验收并标记成稿后，即可在这里找到。</p>
+  </div>
 
-  <nav id="pager" class="pager" hidden>
+  <nav id="pager" class="pager" hidden aria-label="画廊分页导航">
     <span id="pg-info" class="pg-info"></span>
     <span id="pg-controls" class="pg-controls">
       <button id="pg-first" class="pg-btn" title="第一页">«</button>
@@ -318,7 +548,7 @@
       <button id="pg-next" class="pg-btn" title="下一页">›</button>
       <button id="pg-last" class="pg-btn" title="最后一页">»</button>
       <span class="pg-jump">
-        跳至 <input id="pg-input" type="number" min="1" value="1"> 页
+        跳至 <input id="pg-input" type="number" min="1" value="1" aria-label="跳转页码"> 页
         <button id="pg-go" class="pg-btn wide">前往</button>
       </span>
     </span>
@@ -338,24 +568,44 @@
   </div>
 </main>
 
-<!-- 灯箱巨幕检视台：滚轮/按钮缩放、拖拽平移、双击缩放、取色板、参数复用 -->
-<div id="lightbox" class="lightbox" hidden>
+<!-- 灯箱巨幕检视台：滚轮/按钮缩放、拖拽平移、双击缩放、取色板、参数复用、Minimap 雷达导航 -->
+<div id="lightbox" class="lightbox" hidden role="dialog" aria-modal="true" aria-label="艺术照片详情检视">
 <figure class="frame">
   <div class="lb-body">
     <div class="stage">
       <img id="lb-img" alt="" draggable="false">
       <button id="lb-prev" class="lb-nav" aria-label="上一张 (按左方向键)">‹</button>
       <button id="lb-next" class="lb-nav" aria-label="下一张 (按右方向键)">›</button>
+
+      <!-- Minimap Radar 缩放雷达导航器 (#lb-minimap) -->
+      <div id="lb-minimap" class="lb-minimap" title="视口缩放雷达导航图" aria-hidden="true">
+        <canvas id="lb-minimap-canvas" class="lb-minimap-canvas" width="120" height="80"></canvas>
+        <div id="lb-minimap-viewport" class="lb-minimap-viewport"></div>
+      </div>
     </div>
-    <aside class="lb-info">
+
+    <aside class="lb-info" aria-label="照片生成详细参数">
       <div class="lb-info-header">
         <div class="lb-info-title-wrap">
-          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
           <h3>生成档案 · METADATA</h3>
         </div>
       </div>
       <dl class="lb-facts">
-        <dt>模型</dt><dd id="lb-model">—</dd>
+        <dt>模型</dt>
+        <dd class="copyable-fact">
+          <span id="lb-model">—</span>
+          <button id="lb-copy-model" class="mini-copy-btn" type="button" title="一键复制模型名称" aria-label="复制模型名称">
+            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="13" height="13" x="9" y="9" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          </button>
+        </dd>
+        <dt>请求 Seed</dt>
+        <dd class="copyable-fact">
+          <span id="lb-seed">—</span>
+          <button id="lb-copy-seed" class="mini-copy-btn" type="button" title="一键复制随机种子" aria-label="复制随机种子">
+            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="13" height="13" x="9" y="9" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          </button>
+        </dd>
         <dt>API 来源</dt><dd id="lb-provider">—</dd>
         <dt>生成时间</dt><dd id="lb-time">—</dd>
         <dt>出图耗时</dt><dd id="lb-elapsed">—</dd>
@@ -379,12 +629,29 @@
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
           <h3>提示词 · PROMPT</h3>
         </div>
+        <button id="lb-copy-prompt-btn" class="mini-copy-btn prompt-copy-badge" type="button" title="一键复制提示词" aria-label="复制提示词">
+          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="13" height="13" x="9" y="9" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          <span>复制</span>
+        </button>
       </div>
       <p id="lb-prompt" class="lb-prompt">—</p>
 
+      <section id="lb-versions" class="edit-versions" aria-labelledby="lb-versions-title" hidden>
+        <h3 id="lb-versions-title">改图版本</h3>
+        <p id="lb-edit-status" class="edit-hint" hidden></p>
+        <div id="lb-version-links" class="edit-version-links"></div>
+        <button id="lb-review" class="zoom-btn wide" type="button" hidden>打开验收清单</button>
+      </section>
+
       <div class="lb-info-actions">
+        <button id="lb-edit" class="zoom-btn wide primary-action" type="button">基于此图改一版</button>
         <button id="lb-copy" class="zoom-btn wide primary-action">复制 Prompt</button>
         <button id="lb-reuse" class="zoom-btn wide">复用全部参数</button>
+        <!-- A/B 对比触发入口 (#lb-compare-btn) -->
+        <button id="lb-compare-btn" class="zoom-btn wide compare-action-btn" type="button" title="以此图片为基准发起 A/B 画面对比">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/></svg>
+          <span>A/B 对比</span>
+        </button>
         <button id="lb-fav" class="zoom-btn wide">☆ 收藏</button>
         <button id="lb-del" class="danger">删除照片</button>
       </div>
@@ -406,12 +673,133 @@
 </figure>
 </div>
 
+<!-- 交互式 A/B 图像对比分析台 (Interactive A/B Image Comparison Modal) -->
+<div id="compare-modal" class="lightbox compare-modal" hidden role="dialog" aria-modal="true" aria-labelledby="compare-modal-title">
+  <figure class="frame compare-frame">
+    <header class="compare-header">
+      <div class="compare-header-left">
+        <div class="compare-badge-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/>
+          </svg>
+        </div>
+        <div>
+          <h2 id="compare-modal-title">A/B 画面对比分析台</h2>
+          <p class="compare-subtitle">拖拽中轴线滑块实时比对两张生成作品的细节、光影与质感差异</p>
+        </div>
+      </div>
+      <div class="compare-header-actions">
+        <div class="compare-mode-pills" role="radiogroup" aria-label="对比视图模式">
+          <button id="cmp-mode-split" class="compare-pill-btn active" type="button" data-cmp="split" title="左右卷帘分屏比对">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="12" y1="3" x2="12" y2="21"/></svg>
+            <span>左右卷帘</span>
+          </button>
+          <button id="cmp-mode-side" class="compare-pill-btn" type="button" data-cmp="side" title="双联画框对称平铺比对">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="9" height="16" rx="1"/><rect x="13" y="4" width="9" height="16" rx="1"/></svg>
+            <span>双联平铺</span>
+          </button>
+          <button id="cmp-mode-diff" class="compare-pill-btn" type="button" data-cmp="diff" title="差值叠印透视检视">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="12" r="6"/><circle cx="15" cy="12" r="6"/></svg>
+            <span>差异透视</span>
+          </button>
+        </div>
+        <button id="compare-close" class="lb-close-btn compare-close-btn" type="button" aria-label="关闭对比台 (Esc)">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          <span>关闭</span>
+        </button>
+      </div>
+    </header>
+
+    <div class="compare-stage" id="compare-stage">
+      <!-- Split View Container -->
+      <div class="compare-split-wrap" id="compare-split-wrap">
+        <!-- Under / Base Image (B) -->
+        <div class="compare-layer compare-layer-b" id="compare-layer-b">
+          <img id="compare-img-b" alt="对比图片 B" draggable="false">
+          <span class="compare-tag tag-b" id="compare-tag-b">方案 B</span>
+        </div>
+        <!-- Top / Clip Image (A) -->
+        <div class="compare-layer compare-layer-a" id="compare-layer-a">
+          <img id="compare-img-a" alt="对比图片 A" draggable="false">
+          <span class="compare-tag tag-a" id="compare-tag-a">方案 A</span>
+        </div>
+        <!-- Draggable Comparison Handle (#compare-handle) -->
+        <div id="compare-handle" class="compare-handle" role="slider" aria-label="对比中轴滑块" aria-valuenow="50" aria-valuemin="0" aria-valuemax="100" tabindex="0">
+          <div class="handle-line"></div>
+          <div class="handle-knob" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="m8 12-4-4 4-4M16 4l4 4-4 4"/>
+            </svg>
+          </div>
+          <div class="handle-line"></div>
+        </div>
+      </div>
+    </div>
+
+    <section id="compare-review" class="edit-review" aria-labelledby="compare-review-title" hidden>
+      <div class="edit-heading">
+        <h3 id="compare-review-title">改图验收</h3>
+        <span class="edit-hint" id="review-progress"></span>
+      </div>
+      <p id="review-missing-source" class="edit-hint" hidden>原图已删除或无法打开。仍可查看此版的验收记录。</p>
+      <div class="edit-review-checks">
+        <fieldset>
+          <legend>要改什么</legend>
+          <div id="review-change"></div>
+        </fieldset>
+        <fieldset id="review-keep-group" hidden>
+          <legend>要保留什么</legend>
+          <div id="review-keep"></div>
+        </fieldset>
+      </div>
+      <div class="edit-review-actions">
+        <button id="review-save" class="zoom-btn wide" type="button">保存验收</button>
+        <button id="review-final" class="zoom-btn wide edit-final-action" type="button">标记为成稿</button>
+        <span id="review-message" class="edit-hint" role="status"></span>
+      </div>
+    </section>
+
+    <!-- Left / Right Preview Info Cards -->
+    <footer class="compare-footer">
+      <div class="compare-card compare-card-a" id="compare-card-a">
+        <div class="cmp-card-head">
+          <span class="cmp-badge-a">A 方案</span>
+          <span class="cmp-model" id="cmp-model-a">—</span>
+          <span class="cmp-time" id="cmp-time-a">—</span>
+        </div>
+        <p class="cmp-prompt" id="cmp-prompt-a">未指定图片 A</p>
+        <div class="cmp-params-row">
+          <span class="cmp-chip" id="cmp-seed-a">Seed: —</span>
+          <span class="cmp-chip" id="cmp-cfg-a">CFG: —</span>
+          <span class="cmp-chip" id="cmp-size-a">尺寸: —</span>
+          <span class="cmp-chip" id="cmp-prov-a">线路: —</span>
+        </div>
+      </div>
+
+      <div class="compare-card compare-card-b" id="compare-card-b">
+        <div class="cmp-card-head">
+          <span class="cmp-badge-b">B 方案</span>
+          <span class="cmp-model" id="cmp-model-b">—</span>
+          <span class="cmp-time" id="cmp-time-b">—</span>
+        </div>
+        <p class="cmp-prompt" id="cmp-prompt-b">未指定图片 B</p>
+        <div class="cmp-params-row">
+          <span class="cmp-chip" id="cmp-seed-b">Seed: —</span>
+          <span class="cmp-chip" id="cmp-cfg-b">CFG: —</span>
+          <span class="cmp-chip" id="cmp-size-b">尺寸: —</span>
+          <span class="cmp-chip" id="cmp-prov-b">线路: —</span>
+        </div>
+      </div>
+    </footer>
+  </figure>
+</div>
+
 <!-- 工作室设置中心 -->
-<div id="settings" class="lightbox" hidden>
+<div id="settings" class="lightbox" hidden role="dialog" aria-modal="true" aria-labelledby="settings-title">
   <div class="frame settings-frame">
     <div class="settings-head">
       <div class="sh-left">
-        <h2>工作室设置</h2>
+        <h2 id="settings-title">工作室设置</h2>
         <p class="settings-subtitle">管理本地工作台参数、中转站集群与视觉色彩主题</p>
       </div>
       <button id="set-close" class="set-close" aria-label="关闭设置">✕</button>
@@ -523,6 +911,53 @@
       <span id="set-version">拾光 · Studio</span>
       <span id="set-limits" class="label-note"></span>
     </p>
+  </div>
+</div>
+
+<!-- 快捷键速查模态框 (Keyboard Shortcuts Cheatsheet Modal) -->
+<div id="shortcuts-modal" class="lightbox shortcuts-modal" hidden role="dialog" aria-modal="true" aria-labelledby="shortcuts-title" onclick="if(event.target === this) this.hidden = true">
+  <div class="frame shortcuts-frame">
+    <div class="shortcuts-head">
+      <div class="sc-head-left">
+        <div class="sc-icon-gem" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M6 12h.01M10 12h.01M14 12h.01M18 12h.01M8 16h8"/></svg>
+        </div>
+        <div>
+          <h2 id="shortcuts-title">快捷键速查 · SHORTCUTS</h2>
+          <p class="shortcuts-subtitle">工作室高效键盘操作快捷方式指南</p>
+        </div>
+      </div>
+      <button id="shortcuts-close" class="set-close" aria-label="关闭快捷键速查" onclick="document.getElementById('shortcuts-modal').hidden = true">✕</button>
+    </div>
+    <div class="shortcuts-body">
+      <div class="shortcuts-section">
+        <span class="shortcuts-section-title">全局与创作控制</span>
+        <div class="shortcuts-grid">
+          <div class="shortcut-row"><span class="sc-action">快速起炉生成</span><span class="sc-keys"><kbd>Ctrl</kbd> + <kbd>↵</kbd></span></div>
+          <div class="shortcut-row"><span class="sc-action">聚焦搜索框</span><span class="sc-keys"><kbd>/</kbd></span></div>
+          <div class="shortcut-row"><span class="sc-action">关闭当前弹窗 / 退出管理</span><span class="sc-keys"><kbd>Esc</kbd></span></div>
+        </div>
+      </div>
+      <div class="shortcuts-section">
+        <span class="shortcuts-section-title">灯箱巨幕检视台</span>
+        <div class="shortcuts-grid">
+          <div class="shortcut-row"><span class="sc-action">上一张 / 下一张作品</span><span class="sc-keys"><kbd>←</kbd> / <kbd>→</kbd></span></div>
+          <div class="shortcut-row"><span class="sc-action">重置缩放适应窗口</span><span class="sc-keys"><kbd>F</kbd></span></div>
+          <div class="shortcut-row"><span class="sc-action">双击图片缩放</span><span class="sc-keys"><kbd>Double Click</kbd></span></div>
+          <div class="shortcut-row"><span class="sc-action">平移与滚轮微调</span><span class="sc-keys"><kbd>Drag</kbd> / <kbd>Wheel</kbd></span></div>
+        </div>
+      </div>
+      <div class="shortcuts-section">
+        <span class="shortcuts-section-title">A/B 画面对比分析台</span>
+        <div class="shortcuts-grid">
+          <div class="shortcut-row"><span class="sc-action">拖拽分割中轴</span><span class="sc-keys"><kbd>Drag</kbd> / <kbd>Click</kbd></span></div>
+          <div class="shortcut-row"><span class="sc-action">微调分割线</span><span class="sc-keys"><kbd>←</kbd> / <kbd>→</kbd></span></div>
+        </div>
+      </div>
+    </div>
+    <div class="shortcuts-foot">
+      <span>提示：在任何输入框外均可使用单键快捷操作。</span>
+    </div>
   </div>
 </div>
 

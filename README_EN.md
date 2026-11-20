@@ -4,7 +4,7 @@
   <p><b>A local-first, personal AI image-generation workbench & inspiration gallery — tailor-made for you</b><br>Pooled API keys · multi-model scheduling · batch shooting · metadata traceability · zero GPU / Node dependencies</p>
   <p>
     <a href="https://github.com/lmz-666-lmz/ai-image-studio"><img src="https://img.shields.io/badge/GitHub-Repo-181717.svg?logo=github" alt="GitHub"></a>
-    <img src="https://img.shields.io/badge/Version-v1.3.0-e2ad62.svg" alt="v1.3.0">
+    <img src="https://img.shields.io/badge/Version-v1.4.0-e2ad62.svg" alt="v1.4.0">
     <img src="https://img.shields.io/badge/License-MIT-2ea44f.svg" alt="MIT">
     <img src="https://img.shields.io/badge/Python-3.10+-3776ab.svg?logo=python" alt="Python 3.10+">
     <img src="https://img.shields.io/badge/GPU-Not%20Required-8e7cc3.svg" alt="No GPU required">
@@ -46,12 +46,16 @@ Shiguang is a **local-first, personal AI image-generation workbench and inspirat
     <td width="50%" align="center"><img src="screenshots/wall-ink.png" alt="ink theme"><br><sub><b>ink</b> theme</sub></td>
     <td width="50%" align="center"><img src="screenshots/wall-paper.png" alt="paper theme"><br><sub><b>paper</b> theme</sub></td>
   </tr>
+</table>
+<table>
   <tr>
     <td width="33%" align="center"><img src="screenshots/settings-providers.png" alt="Provider settings"><br><sub><b>Providers</b><br>multi-relay · health checks</sub></td>
     <td width="33%" align="center"><img src="screenshots/generating.png" alt="Developing animation"><br><sub><b>Developing</b><br>red-lamp sweep · live timer</sub></td>
     <td width="33%" align="center"><img src="screenshots/lightbox-info.png" alt="Lightbox"><br><sub><b>Lightbox</b><br>zoom/pan · traceability · favorite</sub></td>
   </tr>
 </table>
+<img src="screenshots/edit-review.png" alt="Edit review with the source and new version side by side" width="100%">
+<br><sub>A/B comparison and edit review · demo gallery and mock providers</sub>
 </div>
 
 ## 🚀 Quick start
@@ -139,10 +143,13 @@ Model-family detection covers `gpt-image`, `dall-e`, `nano-banana / banana`, `ge
 - `runtime_state.json` — runtime state such as health records; created automatically, safe to delete.
 - These and `config.json` are all in `.gitignore`.
 
-## 🎛 v1.3.0 feature list
+## 🎛 v1.4.0 feature list
 
 | Feature | Details |
 |---|---|
+| **Edit versions and review** | Start a new version from the lightbox and specify what to change or keep. Check each requirement in A/B comparison and mark a version as final after all checks pass. Source links and review results are stored locally. |
+| **A/B comparison and creative controls** | Compare with a slider, side-by-side view, or difference overlay. Compose prompts with lighting, lens, and style presets. The lightbox offers palette sampling, zoom navigation, and parameter reuse. |
+| **Opt-in extension parameters** | Negative prompts, Seed, and CFG are off by default. Enable them when the relay and model support them. History records the request values. |
 | **Capability auto-adaptation** | Sizes, quality, background, style, count and reference-image entry adapt per model family; unsupported fields are filtered before sending to avoid upstream 400s. A "what will be sent" panel lists the parameters that actually go out. |
 | **A count that really works** | Official `gpt-image` / `gemini image` / `grok image` return exactly one image per call, so extra images are requested sequentially until the chosen count is met; families that do accept `n` (`dall-e` / `seedream` / `flux`) are asked for the whole batch first and topped up only if short. Shortfalls are reported honestly, and a failed top-up keeps the images already produced. |
 | **Multi-reference image-to-image** | Up to 4 PNG / JPEG / WEBP images; single reference uses the `image` field, multiple use `image[]` per the official convention. |
@@ -155,6 +162,14 @@ Model-family detection covers `gpt-image`, `dall-e`, `nano-banana / banana`, `ge
 | **Upstream errors, translated** | Generation failures now append the concrete reason returned by the relay (the `error.message` and friends), instead of a bare HTTP status code. |
 | **Safe failover** | Only on 401 / 403 / 404 / 429 / 502 / 503 / 504 or a clear connection failure, one retry against a backup that caches the same model; never on ambiguous timeouts, and never mid-batch, so one group of images keeps a consistent look. |
 | **Local history & three themes** | Masonry wall, filters, pagination, lightbox, developing animation; an in-memory index keeps it fast with thousands of images. |
+
+<details><summary><b>Changes in v1.4.0</b></summary>
+
+- Added edit versions, per-item review, a finals filter, A/B comparison, prompt presets, and optional darkroom sounds.
+- Batch progress updates as results are saved. Tasks keep the provider selected at submission, cancellation stops subsequent requests, and failed downloads are excluded from the success count.
+- Loading models preserves manual entries. Reusing a work restores only the extension parameters it recorded, so the default CFG is never added to an old request.
+
+</details>
 
 <details><summary><b>Changes since v1.2.0</b></summary>
 
@@ -232,7 +247,7 @@ ai-image-studio/
 
 <details><summary><b>Do my API keys or images get uploaded anywhere?</b></summary>
 
-No. Shiguang listens on `127.0.0.1` only; keys live in the local `config.json`, images in the local `outputs/`; requests go only to the providers you configured. The settings API never returns full keys to the browser.
+Keys are stored in the local `config.json`, and the gallery lives in `outputs/`. Generation sends your key, prompt, and any references for that request to your configured provider. The settings API never returns full keys to the browser. The app listens on `127.0.0.1` by default.
 </details>
 
 <details><summary><b>Why does a model lack quality / background parameters?</b></summary>
@@ -247,7 +262,7 @@ Known models that don't declare `image_to_image` show a hint; switch to an edits
 
 <details><summary><b>Why didn't a failed generation switch providers?</b></summary>
 
-Failover is off by default and only reacts to clear line failures (429 / 502 / 503 / 504 or connection failure), once, and only to a backup caching the same model. 400 / 401 / 403 and ambiguous timeouts are never retried, to avoid duplicate generation and billing.
+Failover is off by default. When enabled, a 401 / 403 / 404 / 429 / 502 / 503 / 504 or clear connection failure can trigger one switch to a backup caching the same model. A 400 or ambiguous timeout does not trigger failover.
 </details>
 
 <details><summary><b>Do health checks cost money?</b></summary>
@@ -262,4 +277,4 @@ Yes. Legacy single-provider `api_base` / `api_key` configs auto-migrate to the p
 
 ---
 
-MIT License · AI Image Studio · Shiguang · v1.3.0
+MIT License · AI Image Studio · Shiguang · v1.4.0

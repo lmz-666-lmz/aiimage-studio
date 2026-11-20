@@ -20,9 +20,9 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from flask import Flask, Response, jsonify, request, send_from_directory
+from flask import Flask, Response, jsonify, request, send_from_directory, url_for
 
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.4.0"
 APP_AUTHOR = "lmz-666-lmz"
 
 SIZE_3_2 = ["1024x1024", "1536x1024", "1024x1536"]
@@ -137,7 +137,10 @@ MAX_REFERENCE_BYTES = 10 * 1024 * 1024
 MAX_REFERENCE_COUNT = 4
 MAX_IMAGES = 4          # 一条提示词一次最多出图张数（与前端「数量」上限一致）
 MAX_PROMPT_CHARS = 8000  # 提示词长度上限，防止误粘贴整篇文档
+MAX_EDIT_ITEMS = 8       # 每组改图要求最多 8 项
+MAX_EDIT_CHARS = 600
 REFERENCE_MIMES = {"image/png", "image/jpeg", "image/webp"}
+EXTENSION_PARAMS = ("negative_prompt", "seed", "cfg_scale")
 
 BASE_DIR = Path(__file__).resolve().parent
 OUTPUT_DIR = BASE_DIR / "outputs"
@@ -745,33 +748,22 @@ def upstream_multipart(path: str, fields: dict, files: list, timeout: int = 300,
         raise ValueError("中转站返回了无法解析的响应（可能不是 JSON）") from e
 
 
-def _ext_from(content_type: str, url: str) -> str:
-    ct = (content_type or "").lower()
-    if "png" in ct: return ".png"
-    if "jpeg" in ct or "jpg" in ct: return ".jpg"
-    if "webp" in ct: return ".webp"
-    low = url.lower().split("?")[0]
-    for ext in (".png", ".jpg", ".jpeg", ".webp"):
-        if low.endswith(ext): return ext
-    return ".png"
-
-
-def _ext_from_blob(blob: bytes) -> str:
-    """b64 返回没有 Content-Type，按真实字节判断格式，避免 PNG 被存成 .webp。"""
-    if blob.startswith(b"\x89PNG"): return ".png"
+def _ext_from_blob(blob: bytes) -> str | None:
+    """按文件签名识别图片，避免把错误页面或空文件存进画廊。"""
+    if blob.startswith(b"\x89PNG\r\n\x1a\n"): return ".png"
     if blob.startswith(b"\xff\xd8"): return ".jpg"
     if blob[:4] == b"RIFF" and blob[8:12] == b"WEBP": return ".webp"
     if blob[:3] == b"GIF": return ".gif"
-    return ".png"
+    return None
 
 
 def _persist_image_results(data: dict, payload: dict, prov: dict, elapsed: float,
                            extra_meta: dict | None = None):
-    items = data.get("data") or []
-    if not items:
+    items = data.get("data") if isinstance(data, dict) else None
+    if not isinstance(items, list) or not items:
         raise ValueError("上游未返回图片")
     extra_meta = extra_meta or {}
-    results = []
+    results, errors = [], []
     for i, item in enumerate(items):
         meta = {"model": payload["model"], "provider": prov["name"], "provider_id": prov["id"],
                 "elapsed": elapsed, "prompt": payload["prompt"], "size": payload.get("size", ""),
@@ -786,24 +778,37 @@ def _persist_image_results(data: dict, payload: dict, prov: dict, elapsed: float
                 "requested": int(extra_meta.get("requested", 1)),
                 "failover": bool(extra_meta.get("failover", False)),
                 "failover_from": extra_meta.get("failover_from", "")}
-        if item.get("b64_json"):
-            blob = base64.b64decode(item["b64_json"])
-            # 时间戳只到秒，追加短随机段防止同秒多次生成互相覆盖
-            name = f"{time.strftime('%Y%m%d_%H%M%S')}_{i}_{uuid.uuid4().hex[:4]}{_ext_from_blob(blob)}"
-            (OUTPUT_DIR / name).write_bytes(blob)
-            _write_meta(name, meta)
-            results.append({"url": f"/outputs/{name}", "name": name, **meta})
-        elif item.get("url"):
-            req = urllib.request.Request(item["url"], headers={"User-Agent": "Mozilla/5.0"})
+        meta.update({key: payload[key] for key in EXTENSION_PARAMS if key in payload})
+        if extra_meta.get("edit"):
+            meta["edit"] = extra_meta["edit"]
+        try:
+            if not isinstance(item, dict):
+                raise ValueError("上游图片条目格式有误")
+            if item.get("b64_json"):
+                blob = base64.b64decode(item["b64_json"], validate=True)
+            elif isinstance(item.get("url"), str) and item["url"].startswith(("http://", "https://")):
+                req = urllib.request.Request(item["url"], headers={"User-Agent": "Mozilla/5.0"})
+                blob, _ = _fetch(req, 120)
+            else:
+                raise ValueError("上游未提供可用的图片地址或数据")
+            ext = _ext_from_blob(blob)
+            if not ext:
+                raise ValueError("上游返回的内容不是可识别的图片")
+        except (OSError, ValueError, TypeError) as e:
+            errors.append(f"第 {i + 1} 张图片读取失败：{friendly_error(e)}")
+            continue
+        name = f"{time.strftime('%Y%m%d_%H%M%S')}_{i}_{uuid.uuid4().hex[:8]}{ext}"
+        image_path = OUTPUT_DIR / name
+        with _hist_lock:
             try:
-                blob, ct = _fetch(req, 120)
-                name = f"{time.strftime('%Y%m%d_%H%M%S')}_{i}_{uuid.uuid4().hex[:4]}{_ext_from(ct, item['url'])}"
-                (OUTPUT_DIR / name).write_bytes(blob)
+                image_path.write_bytes(blob)
                 _write_meta(name, meta)
-                results.append({"url": f"/outputs/{name}", "name": name, **meta})
-            except Exception as e:
-                results.append({"url": item["url"], "name": None, "fetch_error": friendly_error(e)})
-    return results
+            except OSError as e:
+                image_path.unlink(missing_ok=True)
+                errors.append(f"第 {i + 1} 张图片保存失败：{e.strerror or e}")
+                continue
+        results.append({"url": f"/outputs/{name}", "name": name, **meta})
+    return results, errors
 
 
 def _filtered_payload(body: dict, model: str, cap: dict) -> tuple[dict, int]:
@@ -827,7 +832,7 @@ def _filtered_payload(body: dict, model: str, cap: dict) -> tuple[dict, int]:
     if cap.get("n"):
         try:
             target_n = min(MAX_IMAGES, max(1, int(body.get("n", 1))))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             target_n = 1
         if target_n > 1 and cap.get("n_mode", "upstream") == "upstream":
             payload["n"] = target_n
@@ -836,6 +841,7 @@ def _filtered_payload(body: dict, model: str, cap: dict) -> tuple[dict, int]:
         allowed = cap.get(f"{key}_values")
         if cap.get(key) and value and (not allowed or value in allowed):
             payload[key] = value
+    payload.update({key: body[key] for key in EXTENSION_PARAMS if key in body})
     return payload, target_n
 
 
@@ -860,6 +866,45 @@ def _reference_files():
     return references, None
 
 
+def _edit_reference(body: dict):
+    parent = body.get("edit_parent")
+    path = _output_image_path(parent)
+    if path is None:
+        raise ValueError("改图原图已删除或无法读取")
+
+    groups = {}
+    for key, label in (("change", "要改什么"), ("keep", "要保留什么")):
+        raw = body.get(f"edit_{key}", "")
+        if not isinstance(raw, str) or len(raw) > MAX_EDIT_CHARS:
+            raise ValueError(f"「{label}」最多 {MAX_EDIT_CHARS} 字")
+        items = [line.strip() for line in raw.splitlines() if line.strip()]
+        if len(items) > MAX_EDIT_ITEMS:
+            raise ValueError(f"「{label}」最多 {MAX_EDIT_ITEMS} 项，每行一项")
+        groups[key] = items
+    if not groups["change"]:
+        raise ValueError("请填写要改什么")
+
+    try:
+        with path.open("rb") as source:
+            blob = source.read(MAX_REFERENCE_BYTES + 1)
+    except OSError as exc:
+        raise ValueError("改图原图已删除或无法读取") from exc
+    mime = {".png": "image/png", ".jpg": "image/jpeg", ".webp": "image/webp"}.get(_ext_from_blob(blob))
+    if mime not in REFERENCE_MIMES:
+        raise ValueError("改图原图仅支持 PNG、JPEG 或 WEBP")
+    if len(blob) > MAX_REFERENCE_BYTES:
+        raise ValueError(f"改图原图超过 {MAX_REFERENCE_BYTES // (1024 * 1024)}MB")
+
+    edit = {"parent": parent, **groups,
+            "review": {"checks": [False] * (len(groups["change"]) + len(groups["keep"])), "final": False}}
+    prompt_lines = ["请修改参考图。", "要改：", *[f"- {item}" for item in groups["change"]]]
+    if groups["keep"]:
+        prompt_lines += ["要保留：", *[f"- {item}" for item in groups["keep"]]]
+    body["prompt"] = "\n".join(prompt_lines)
+    body["n"] = 1
+    return edit, [(parent, mime, blob)]
+
+
 def _providers_for_model(model: str, primary: dict):
     return [p for p in config["providers"] if p["id"] != primary["id"] and model in (p.get("models") or [])]
 
@@ -876,16 +921,49 @@ class GenError(Exception):
 def _parse_generation_body():
     """从 JSON / multipart 请求解析生成参数。返回 (body, reference list|None, error)。"""
     is_multipart = request.mimetype == "multipart/form-data"
-    body = request.form.to_dict() if is_multipart else (request.get_json(silent=True) or {})
+    body = request.form.to_dict() if is_multipart else request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return None, None, "生成参数必须是 JSON 对象或参考图表单"
+    for key in ("prompt", "model", "negative_prompt"):
+        if body.get(key) is not None and not isinstance(body[key], str):
+            return None, None, f"{key} 必须是文本"
+    negative = (body.pop("negative_prompt", None) or "").strip()
+    if len(negative) > MAX_PROMPT_CHARS:
+        return None, None, f"反向提示词最多 {MAX_PROMPT_CHARS} 字"
+    if negative:
+        body["negative_prompt"] = negative
+    seed = body.pop("seed", None)
+    if seed not in (None, "", -1, "-1"):
+        if not re.fullmatch(r"[0-9]{1,10}", str(seed)) or int(seed) > 4294967295:
+            return None, None, "Seed 必须是 0 到 4294967295 的整数，或留空随机生成"
+        body["seed"] = int(seed)
+    cfg_scale = body.pop("cfg_scale", None)
+    if cfg_scale not in (None, ""):
+        try:
+            cfg_scale = float(str(cfg_scale))
+        except ValueError:
+            return None, None, "CFG 必须是 1 到 20 的数字"
+        if not 1 <= cfg_scale <= 20:
+            return None, None, "CFG 必须是 1 到 20 的数字"
+        body["cfg_scale"] = cfg_scale
     reference = None
-    if is_multipart:
+    body["edit"] = None
+    if any(key in body for key in ("edit_parent", "edit_change", "edit_keep")):
+        if is_multipart:
+            return None, None, "改图使用图库原图，请退出改图后再上传其他参考图"
+        try:
+            body["edit"], reference = _edit_reference(body)
+        except ValueError as exc:
+            return None, None, str(exc)
+    elif is_multipart:
         reference, error = _reference_files()
         if error:
             return None, None, error
     return body, reference, None
 
 
-def _call_with_failover(model: str, prov: dict, body: dict, call, allow_failover: bool = True):
+def _call_with_failover(model: str, prov: dict, body: dict, call, allow_failover: bool = True,
+                        should_stop=None):
     """一次上游调用（含可选的安全故障切换）。
 
     返回 (data, 实际使用的中转站, 切换来源名称)。失败抛 GenError，并把原始异常
@@ -906,6 +984,8 @@ def _call_with_failover(model: str, prov: dict, body: dict, call, allow_failover
         if not candidates:
             raise GenError(f"主中转站失败，备用站没有同名模型（{model}）", cause=primary_error)
         backup = candidates[0]  # at most one fallback request per round
+        if should_stop and should_stop():
+            raise GenError(detail_msg, cause=primary_error)
         try:
             data = call(body, backup)
             set_health(backup, "healthy")
@@ -914,13 +994,15 @@ def _call_with_failover(model: str, prov: dict, body: dict, call, allow_failover
             set_health(backup, error_status(backup_error), error=backup_msg)
             raise GenError(f"主线路与备用线路均不可用：{backup_msg}", cause=backup_error)
         with CONFIG_LOCK:
-            config["active_provider"] = backup["id"]
-            save_config()
+            if config["active_provider"] == prov["id"] and backup in config["providers"]:
+                config["active_provider"] = backup["id"]
+                save_config()
         return data, backup, prov["name"]
 
 
 def _run_generation(model: str, payload: dict, reference: list | None, target_n: int = 1,
-                    should_stop=None, fallback_size: str | None = None) -> dict:
+                    should_stop=None, fallback_size: str | None = None,
+                    provider_id: str | None = None, on_images=None, edit: dict | None = None) -> dict:
     """完整生成流程：按需要出 target_n 张，调用上游、安全故障切换、持久化。
 
     中转站一次只返回 1 张时（gpt-image / gemini / grok 等官方接口的常态）会继续
@@ -930,7 +1012,12 @@ def _run_generation(model: str, payload: dict, reference: list | None, target_n:
     画幅被中转站拒绝（400/422，常见于它只认官方尺寸）时，会退到该模型族的官方
     尺寸重试一次，并把「你要的尺寸」与「实际用的尺寸」都写进元数据。失败抛 GenError。
     """
-    prov = active_provider()
+    with CONFIG_LOCK:
+        provider = (next((p for p in config["providers"] if p["id"] == provider_id), None)
+                    if provider_id is not None else active_provider())
+        prov = dict(provider) if provider else None
+    if provider_id is not None and prov is None:
+        raise GenError("提交任务时选择的中转站已被删除", 400)
     if not prov or not prov.get("api_base") or not prov.get("api_key"):
         raise GenError("还没有可用的中转站，请在设置里添加并填写地址和密钥", 400)
     target_n = max(1, min(MAX_IMAGES, int(target_n or 1)))
@@ -952,11 +1039,9 @@ def _run_generation(model: str, payload: dict, reference: list | None, target_n:
     failover_from = ""
     tls_notes = []          # 证书降级等线程本地提示要带回给前端（任务队列里没人读线程本地值）
     started = time.time()
-    attempts = 0
-    while len(images) < target_n and attempts < MAX_IMAGES * 2 + 6:
-        if images and should_stop and should_stop():
-            break   # 已出图且用户取消：停在当前这张，不再追加请求
-        attempts += 1
+    while len(images) < target_n:
+        if should_stop and should_stop():
+            break
         body = dict(payload)
         if sends_n:
             # 首轮按用户张数请求；补齐轮只要还差的张数
@@ -966,7 +1051,7 @@ def _run_generation(model: str, payload: dict, reference: list | None, target_n:
         round_started = time.time()
         try:
             data, prov, switched_from = _call_with_failover(
-                model, prov, body, call, allow_failover=not images)
+                model, prov, body, call, allow_failover=not images, should_stop=should_stop)
         except GenError as e:
             cause = e.cause
             rejected = isinstance(cause, urllib.error.HTTPError) and cause.code in (400, 404, 422)
@@ -978,7 +1063,6 @@ def _run_generation(model: str, payload: dict, reference: list | None, target_n:
                 # 中转站不认这个画幅：退到官方尺寸重来，别让用户白等一次
                 size_dropped = body["size"]
                 payload = {**payload, "size": fallback_size}
-                errors.append(f"中转站不接受 {size_dropped}，已改用 {fallback_size}")
                 continue
             if images:   # 已经出了图，剩下的补不齐只提示，不整单失败
                 errors.append(str(e))
@@ -991,24 +1075,28 @@ def _run_generation(model: str, payload: dict, reference: list | None, target_n:
             failover, failover_from = True, switched_from
         round_elapsed = round(time.time() - round_started, 1)
         try:
-            round_images = _persist_image_results(data, body, prov, round_elapsed, {
+            round_images, result_errors = _persist_image_results(data, body, prov, round_elapsed, {
                 "mode": mode, "reference_used": bool(reference),
                 "reference_name": "、".join(fn for fn, _, _ in reference) if reference else "",
                 "reference_count": len(reference) if reference else 0,
                 "requested": target_n, "size_requested": size_dropped,
                 "failover": failover, "failover_from": failover_from,
+                "edit": edit,
             })
         except ValueError as e:
             if images:
                 errors.append(str(e))
                 break
             raise GenError(str(e))
-        if not round_images:
-            errors.append("上游返回的数据里没有可用图片")
-            break
         images.extend(round_images)
+        if round_images and on_images:
+            on_images(round_images)
+        if result_errors:
+            # 上游可能已经计费。保留已保存的图，由用户决定是否再试。
+            errors.extend(result_errors)
+            break
 
-    if not images:
+    if not images and not (should_stop and should_stop()):
         raise GenError(errors[0] if errors else "上游未返回图片")
     elapsed = round(time.time() - started, 1)
     response = {"images": images, "elapsed": elapsed, "model": model,
@@ -1025,6 +1113,8 @@ def _run_generation(model: str, payload: dict, reference: list | None, target_n:
     if len(images) < target_n:
         notes.append(f"请求 {target_n} 张，实际得到 {len(images)} 张"
                      f"（{errors[0] if errors else '上游未返回更多图片'}）")
+    elif errors:
+        notes.append(errors[0])
     if tls_notes:
         notes.extend(tls_notes)
     if notes:
@@ -1051,7 +1141,7 @@ def generate():
     payload, target_n = _filtered_payload(body, model, cap)
     try:
         response = _run_generation(model, payload, reference, target_n,
-                                   fallback_size=(cap.get("supported_sizes") or [None])[0])
+                                   fallback_size=(cap.get("supported_sizes") or [None])[0], edit=body["edit"])
     except GenError as e:
         return jsonify(with_tls_note({"error": str(e)})), e.status
     return jsonify(with_tls_note(response))
@@ -1076,6 +1166,14 @@ def _purge_tasks():
 
 
 def _run_batch_task(task: dict):
+    def should_stop():
+        with _tasks_lock:
+            return task["status"] in ("cancelled", "cancelling")
+
+    def record_images(images):
+        with _tasks_lock:
+            task["images"].extend(images)
+
     for i, prompt in enumerate(task["prompts"]):
         with _tasks_lock:
             if task["status"] in ("cancelled", "cancelling"):
@@ -1085,10 +1183,9 @@ def _run_batch_task(task: dict):
         payload = {**task["base_payload"], "prompt": prompt}
         try:
             result = _run_generation(task["model"], payload, task["reference"], task.get("target_n", 1),
-                                     should_stop=lambda: task["status"] in ("cancelled", "cancelling"),
-                                     fallback_size=task.get("fallback_size"))
+                                     should_stop=should_stop, fallback_size=task.get("fallback_size"),
+                                     provider_id=task["provider_id"], on_images=record_images, edit=task["edit"])
             with _tasks_lock:
-                task["images"].extend(result["images"])
                 if result.get("notice"):
                     task["notice"] = result["notice"]
         except GenError as e:
@@ -1103,6 +1200,7 @@ def _run_batch_task(task: dict):
             task["status"] = "cancelled"
         elif task["status"] != "cancelled":
             task["status"] = "failed" if task["errors"] and not task["images"] else "done"
+        task["reference"] = None
         task["finished_at"] = time.time()
 
 
@@ -1154,7 +1252,8 @@ def generate_task():
     _purge_tasks()
     tid = uuid.uuid4().hex[:12]
     task = {"id": tid, "status": "queued", "model": model, "prompts": [prompt],
-            "base_payload": base_payload, "reference": reference, "target_n": target_n,
+            "provider_id": prov["id"],
+            "base_payload": base_payload, "reference": reference, "target_n": target_n, "edit": body["edit"],
             "fallback_size": (cap.get("supported_sizes") or [None])[0],
             "total": 1, "index": 0, "images": [], "errors": [],
             "notice": "", "created_at": time.time(), "finished_at": None}
@@ -1216,12 +1315,28 @@ _hist_mtime = {}     # name -> 图片文件 mtime
 _hist_sc_mtime = {}  # name -> sidecar mtime（收藏等只改 sidecar 的操作靠它发现变化）
 
 
+def _output_image_path(name):
+    if not isinstance(name, str) or not name or any(part in name for part in ("/", "\\", ":", "..", "\0")):
+        return None
+    path = OUTPUT_DIR / name
+    if path.suffix.lower() not in IMAGE_EXTS:
+        return None
+    try:
+        if path.is_file() and path.resolve().parent == OUTPUT_DIR.resolve():
+            return path
+    except (OSError, ValueError, RuntimeError):
+        pass
+    return None
+
+
 def _read_meta(p: Path) -> dict:
     sidecar = p.with_name(p.name + ".json")
     if sidecar.exists():
         try:
-            return json.loads(sidecar.read_text(encoding="utf-8"))
-        except Exception:
+            meta = json.loads(sidecar.read_text(encoding="utf-8"))
+            if isinstance(meta, dict):
+                return meta
+        except (OSError, ValueError):
             pass
     return {}
 
@@ -1266,6 +1381,34 @@ def history_index() -> dict:
         return images
 
 
+def _history_item(name: str, mtime: float, meta: dict) -> dict:
+    return {
+        "name": name,
+        "url": url_for("outputs", name=name),
+        "mtime": mtime,
+        "model": meta.get("model", ""),
+        "provider": meta.get("provider", ""),
+        "provider_id": meta.get("provider_id", ""),
+        "elapsed": meta.get("elapsed"),
+        "prompt": meta.get("prompt", ""),
+        "size": meta.get("size", ""),
+        "size_requested": meta.get("size_requested", ""),
+        "quality": meta.get("quality", ""),
+        "background": meta.get("background", ""),
+        "style": meta.get("style", ""),
+        **{key: meta[key] for key in (*EXTENSION_PARAMS, "edit") if key in meta},
+        "mode": meta.get("mode", "text-to-image"),
+        "reference_used": bool(meta.get("reference_used", False)),
+        "reference_name": meta.get("reference_name", ""),
+        "reference_count": int(meta.get("reference_count", 0) or 0),
+        "requested": int(meta.get("requested", 1) or 1),
+        "failover": bool(meta.get("failover", False)),
+        "failover_from": meta.get("failover_from", ""),
+        "favorite": bool(meta.get("favorite", False)),
+        "created_time": meta.get("created_time", time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(mtime))),
+    }
+
+
 @app.get("/api/history")
 def history():
     page = max(1, request.args.get("page", 1, type=int))
@@ -1276,6 +1419,7 @@ def history():
     rng = request.args.get("range") or "all"
     sort = request.args.get("sort") or "newest"
     only_fav = request.args.get("favorite") in ("1", "true")
+    only_final = request.args.get("final") in ("1", "true")
     now = time.time()
 
     images = history_index()
@@ -1298,6 +1442,8 @@ def history():
             continue
         if only_fav and not meta.get("favorite"):
             continue
+        if only_final and not (meta.get("edit") or {}).get("review", {}).get("final"):
+            continue
         if rng in _RANGE_SPANS and now - created > _RANGE_SPANS[rng]:
             continue
         entries.append((name, mtime, meta))
@@ -1313,36 +1459,57 @@ def history():
     pages = max(1, -(-total // page_size))
     page = min(page, pages)
 
-    items = []
-    for name, mtime, meta in entries[(page - 1) * page_size : page * page_size]:
-        items.append({
-            "name": name,
-            "url": f"/outputs/{name}",
-            "mtime": mtime,
-            "model": meta.get("model", ""),
-            "provider": meta.get("provider", ""),
-            "provider_id": meta.get("provider_id", ""),
-            "elapsed": meta.get("elapsed"),
-            "prompt": meta.get("prompt", ""),
-            "size": meta.get("size", ""),
-            "size_requested": meta.get("size_requested", ""),
-            "quality": meta.get("quality", ""),
-            "background": meta.get("background", ""),
-            "style": meta.get("style", ""),
-            "mode": meta.get("mode", "text-to-image"),
-            "reference_used": bool(meta.get("reference_used", False)),
-            "reference_name": meta.get("reference_name", ""),
-            "reference_count": int(meta.get("reference_count", 0) or 0),
-            "requested": int(meta.get("requested", 1) or 1),
-            "failover": bool(meta.get("failover", False)),
-            "failover_from": meta.get("failover_from", ""),
-            "favorite": bool(meta.get("favorite", False)),
-            "created_time": meta.get("created_time", time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(mtime))),
-        })
+    items = [_history_item(*entry) for entry in entries[(page - 1) * page_size : page * page_size]]
     return jsonify({
         "items": items, "page": page, "pages": pages, "total": total,
         "facets": {"models": sorted(model_facets), "providers": sorted(provider_facets)},
     })
+
+
+@app.get("/api/history/versions")
+def history_versions():
+    name = request.args.get("name", "")
+    images = history_index()
+    with _hist_lock:
+        if name not in images or _output_image_path(name) is None:
+            return jsonify({"error": "这张图已删除或无法读取"}), 404
+        meta = _hist_meta.get(name) or {}
+        parent = (meta.get("edit") or {}).get("parent")
+        return jsonify({
+            "item": _history_item(name, images[name], meta),
+            "parent": _history_item(parent, images[parent], _hist_meta.get(parent) or {})
+            if parent in images and _output_image_path(parent) is not None else None,
+            "children": [
+                _history_item(child, images[child], _hist_meta[child])
+                for child in sorted(images, reverse=True)
+                if (_hist_meta.get(child, {}).get("edit") or {}).get("parent") == name
+            ],
+        })
+
+
+@app.post("/api/history/review")
+def history_review():
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify({"error": "验收内容格式有误"}), 400
+    checks, final = body.get("checks"), body.get("final")
+    if not isinstance(checks, list) or any(type(check) is not bool for check in checks) or type(final) is not bool:
+        return jsonify({"error": "验收内容格式有误"}), 400
+    with _hist_lock:
+        path = _output_image_path(body.get("name"))
+        if path is None:
+            return jsonify({"error": "这张图已删除或无法读取"}), 404
+        meta = _read_meta(path)
+        edit = meta.get("edit")
+        if not edit or len(checks) != len(edit["change"]) + len(edit["keep"]):
+            return jsonify({"error": "验收项与改图记录不一致"}), 400
+        if final and not all(checks):
+            return jsonify({"error": "全部验收通过后才能标记成稿"}), 400
+        edit["review"] = {"checks": checks, "final": final, "saved_at": time.strftime("%Y-%m-%d %H:%M:%S")}
+        _write_meta(path.name, meta)
+        _hist_meta[path.name] = meta
+        _hist_sc_mtime[path.name] = path.with_name(path.name + ".json").stat().st_mtime
+    return jsonify({"review": edit["review"]})
 
 
 @app.get("/api/history/export")
@@ -1366,15 +1533,15 @@ def favorite():
     """切换或显式设置收藏；写 sidecar 并同步内存索引。"""
     body = request.get_json(force=True)
     name = (body.get("name") or "").strip()
-    if not name or "/" in name or "\\" in name or ".." in name or not (OUTPUT_DIR / name).exists():
-        return jsonify({"error": "无效文件名"}), 400
-    meta = _read_meta(OUTPUT_DIR / name)
-    if "favorite" in body:
-        meta["favorite"] = bool(body["favorite"])
-    else:
-        meta["favorite"] = not meta.get("favorite", False)
-    _write_meta(name, meta)
     with _hist_lock:
+        if not name or "/" in name or "\\" in name or ".." in name or not (OUTPUT_DIR / name).exists():
+            return jsonify({"error": "无效文件名"}), 400
+        meta = _read_meta(OUTPUT_DIR / name)
+        if "favorite" in body:
+            meta["favorite"] = bool(body["favorite"])
+        else:
+            meta["favorite"] = not meta.get("favorite", False)
+        _write_meta(name, meta)
         _hist_meta[name] = meta
         _hist_sc_mtime[name] = (OUTPUT_DIR / (name + ".json")).stat().st_mtime
     return jsonify({"ok": True, "name": name, "favorite": meta["favorite"]})
@@ -1397,18 +1564,17 @@ def delete():
             return jsonify({"error": f"无效文件名：{name}"}), 400
         cleaned.append(name)
     deleted = 0
-    for name in cleaned:
-        removed = False
-        for suffix in ("", ".json"):
-            f = OUTPUT_DIR / (name + suffix)
-            if f.exists():
-                f.unlink()
-                removed = True
-        if removed:
-            deleted += 1
     global _hist_sig
     with _hist_lock:
         for name in cleaned:
+            removed = False
+            for suffix in ("", ".json"):
+                f = OUTPUT_DIR / (name + suffix)
+                if f.exists():
+                    f.unlink()
+                    removed = True
+            if removed:
+                deleted += 1
             _hist_meta.pop(name, None)
             _hist_mtime.pop(name, None)
             _hist_sc_mtime.pop(name, None)

@@ -1,4 +1,4 @@
-/* 拾光 · 前端逻辑：生成 / 瀑布流分页与筛选 / 中转站管理 / 灯箱信息面板 / GSAP 动效 */
+/* 拾光 · 前端逻辑：生成 / 瀑布流分页与筛选 / 中转站管理 / 灯箱信息面板 / GSAP 动效 / A/B 对比 / 专业预设矩阵 / Web Audio 暗房音效 */
 const $ = (id) => document.getElementById(id);
 
 let busy = false;
@@ -17,27 +17,235 @@ let capabilityMatchers = [
 let limits = { max_images: 4, max_references: 4, max_reference_mb: 10, max_prompt_chars: 8000 };
 let referenceFiles = [];     // 多参考图：[{File}]，最多 limits.max_references 张
 let refObjectUrls = [];      // 参考图缩略图的 objectURL，重渲染前回收
+let editSource = null;
 let editingPid = "";         // 正在编辑的中转站，空 = 新增
-let wallItems = [];          // 当前墙上的图片（新→旧），供灯箱左右切换
+let wallItems = [];          // 当前墙上的图片（新→旧），供灯箱左右切换与 A/B 对比
 const PAGE_SIZE = 12;
 // 生成参数与草稿都记在本地：刷页面不用重设，符合反复打磨一张图的工作习惯
 const SETTINGS_KEY = "is_gen_settings";
 const DRAFT_KEY = "is_prompt_draft";
 const SPEED_KEY = "is_model_speed";
+const SOUND_KEY = "is_sound_enabled";
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const gsapOK = typeof gsap !== "undefined" && !reduceMotion;
 
 function showToast(text, type = "info") {
   const container = $("toast-container");
   if (!container) return;
+  const icons = { success: "✦", error: "✕", info: "ℹ" };
+  const icon = icons[type] || "✦";
   const toast = document.createElement("div");
   toast.className = `toast toast-${type}`;
-  toast.innerHTML = `<span>${String(text).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]))}</span>`;
+  toast.innerHTML = `<span class="toast-icon">${icon}</span><span>${String(text).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]))}</span>`;
   container.appendChild(toast);
   setTimeout(() => {
     toast.classList.add("toast-fadeout");
     setTimeout(() => toast.remove(), 260);
-  }, 2400);
+  }, 2600);
+}
+
+/* ==========================================================================
+   Web Audio API 暗房音效引擎 (Darkroom Soundscapes)
+   纯算法合成：柔和快门声、完成定影空灵风铃、暗房红灯安全弱鸣
+   ========================================================================== */
+let soundEnabled = lsGet(SOUND_KEY, false); // 默认静音
+let audioCtx = null;
+let safelightHumNode = null;
+let safelightGainNode = null;
+
+function getAudioContext() {
+  if (!audioCtx) {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (AudioContextClass) {
+      audioCtx = new AudioContextClass();
+    }
+  }
+  if (audioCtx && audioCtx.state === "suspended") {
+    audioCtx.resume().catch(() => {});
+  }
+  return audioCtx;
+}
+
+// 柔和暗房机械相机快门声 (Soft Mechanical Camera Shutter Click)
+function playShutterSound() {
+  if (!soundEnabled) return;
+  try {
+    const ctx = getAudioContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+
+    // 1. 反光板弹起冲击 (Mirror Lift Noise Burst)
+    const bufferSize = Math.floor(ctx.sampleRate * 0.038);
+    const noiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+    const output = noiseBuffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      output[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.28));
+    }
+    const noise = ctx.createBufferSource();
+    noise.buffer = noiseBuffer;
+    const filter = ctx.createBiquadFilter();
+    filter.type = "bandpass";
+    filter.frequency.setValueAtTime(1350, now);
+    filter.Q.setValueAtTime(3.2, now);
+    const noiseGain = ctx.createGain();
+    noiseGain.gain.setValueAtTime(0.24, now);
+    noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.036);
+    noise.connect(filter);
+    filter.connect(noiseGain);
+    noiseGain.connect(ctx.destination);
+    noise.start(now);
+
+    // 2. 机械快门叶片扫动 (Shutter Blade Sweep)
+    const osc = ctx.createOscillator();
+    const oscGain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(700, now);
+    osc.frequency.exponentialRampToValueAtTime(110, now + 0.03);
+    oscGain.gain.setValueAtTime(0.18, now);
+    oscGain.gain.exponentialRampToValueAtTime(0.001, now + 0.032);
+    osc.connect(oscGain);
+    oscGain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.034);
+
+    // 3. 后帘闭合二次瞬态 (Curtain Close Click) ~42ms 后
+    const closeNoise = ctx.createBufferSource();
+    closeNoise.buffer = noiseBuffer;
+    const closeFilter = ctx.createBiquadFilter();
+    closeFilter.type = "bandpass";
+    closeFilter.frequency.setValueAtTime(1150, now + 0.042);
+    closeFilter.Q.setValueAtTime(2.6, now + 0.042);
+    const closeGain = ctx.createGain();
+    closeGain.gain.setValueAtTime(0.001, now);
+    closeGain.gain.setValueAtTime(0.16, now + 0.042);
+    closeGain.gain.exponentialRampToValueAtTime(0.001, now + 0.075);
+    closeNoise.connect(closeFilter);
+    closeFilter.connect(closeGain);
+    closeGain.connect(ctx.destination);
+    closeNoise.start(now + 0.042);
+  } catch {
+    // 忽略音频策略限制
+  }
+}
+
+// 显影定影完成晶莹风铃声 (Pleasant Pentatonic Darkroom Chime)
+function playChimeSound() {
+  if (!soundEnabled) return;
+  try {
+    const ctx = getAudioContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    // 五度空灵和弦: E5 (659Hz), B5 (988Hz), E6 (1318Hz), G#6 (1661Hz)
+    const freqs = [659.25, 987.77, 1318.51, 1661.22];
+    freqs.forEach((freq, idx) => {
+      const startTime = now + idx * 0.055;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(freq, startTime);
+      gain.gain.setValueAtTime(0.001, startTime);
+      gain.gain.linearRampToValueAtTime(0.12 / (idx + 1), startTime + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.0001, startTime + 1.15);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(startTime);
+      osc.stop(startTime + 1.2);
+    });
+  } catch {
+    // 忽略音频策略限制
+  }
+}
+
+// 复古暗房安全灯低频微鸣 (Retro Darkroom Safelight Hum)
+function startSafelightHum() {
+  if (!soundEnabled) return;
+  try {
+    const ctx = getAudioContext();
+    if (!ctx || safelightHumNode) return;
+    const now = ctx.currentTime;
+
+    const osc1 = ctx.createOscillator();
+    osc1.type = "sine";
+    osc1.frequency.setValueAtTime(55, now); // 55Hz 基频交流微鸣
+
+    const osc2 = ctx.createOscillator();
+    osc2.type = "sine";
+    osc2.frequency.setValueAtTime(110, now); // 110Hz 谐波
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.setValueAtTime(130, now);
+
+    safelightGainNode = ctx.createGain();
+    safelightGainNode.gain.setValueAtTime(0.0001, now);
+    safelightGainNode.gain.linearRampToValueAtTime(0.012, now + 1.2); // 极温和低沉背景声
+
+    osc1.connect(filter);
+    osc2.connect(filter);
+    filter.connect(safelightGainNode);
+    safelightGainNode.connect(ctx.destination);
+
+    osc1.start(now);
+    osc2.start(now);
+    safelightHumNode = { osc1, osc2 };
+  } catch {}
+}
+
+function stopSafelightHum() {
+  if (!safelightGainNode || !audioCtx) return;
+  try {
+    const now = audioCtx.currentTime;
+    safelightGainNode.gain.linearRampToValueAtTime(0.0001, now + 0.4);
+    setTimeout(() => {
+      if (safelightHumNode) {
+        try { safelightHumNode.osc1.stop(); safelightHumNode.osc2.stop(); } catch {}
+        safelightHumNode = null;
+      }
+      safelightGainNode = null;
+    }, 450);
+  } catch {}
+}
+
+function updateSoundToggleUI() {
+  const btn = $("sound-toggle");
+  if (!btn) return;
+  btn.setAttribute("aria-pressed", String(soundEnabled));
+  btn.classList.toggle("on", soundEnabled);
+  btn.classList.toggle("muted", !soundEnabled);
+  btn.title = soundEnabled ? "暗房沉浸音效已开启 (点击静音)" : "暗房沉浸音效已静音 (点击开启)";
+}
+
+function setSoundEnabled(enabled) {
+  soundEnabled = !!enabled;
+  lsSet(SOUND_KEY, soundEnabled);
+  updateSoundToggleUI();
+  if (soundEnabled) {
+    getAudioContext();
+    startSafelightHum();
+    playShutterSound();
+    showToast("暗房沉浸音效已开启 🔊", "info");
+  } else {
+    stopSafelightHum();
+    showToast("暗房音效已静音 🔇", "info");
+  }
+}
+
+function initSoundEngine() {
+  const btn = $("sound-toggle");
+  if (btn) {
+    updateSoundToggleUI();
+    btn.addEventListener("click", () => setSoundEnabled(!soundEnabled));
+  }
+  if (soundEnabled) {
+    // 首次交互时唤醒背景微鸣
+    const resumeOnTouch = () => {
+      startSafelightHum();
+      window.removeEventListener("pointerdown", resumeOnTouch);
+      window.removeEventListener("keydown", resumeOnTouch);
+    };
+    window.addEventListener("pointerdown", resumeOnTouch, { once: true });
+    window.addEventListener("keydown", resumeOnTouch, { once: true });
+  }
 }
 
 /* ---------- 本地轻量记忆 ---------- */
@@ -115,6 +323,7 @@ function setPrompt(text) {
   $("prompt").value = text || "";
   renderPromptMeta();
   saveDraft();
+  syncPresetChipsActive();
   renderRequestPreview(capabilityFor(modelInput?.value || ""));
 }
 
@@ -246,7 +455,10 @@ async function loadSettings() {
     $("failover-toggle").checked = !!s.failover_enabled;
     renderQuantityGroup();
     renderRailProvider();
-    $("set-version").textContent = `v${s.version || "—"}`;
+    const version = s.version ? `v${s.version}` : "";
+    $("set-version").textContent = version;
+    $("brand-version").textContent = version;
+    $("brand-version").hidden = !version;
     $("set-limits").textContent =
       `· 一条提示词最多 ${limits.max_images} 张 · 参考图 ${limits.max_references} 张/${limits.max_reference_mb}MB · 提示词上限 ${limits.max_prompt_chars} 字`;
     renderProviders();
@@ -354,7 +566,6 @@ function labelOf(sel) {
 }
 
 /* ---------- 画幅：按比例画小方框 ---------- */
-// 后端 /api/capabilities 下发的通用画幅库；中转站按 WxH 透传，官方尺寸会额外标记
 let sizeLibrary = [
   { size: "1024x1024", ratio: "1:1", group: "方" },
   { size: "1280x1024", ratio: "5:4", group: "横" },
@@ -379,7 +590,6 @@ function ratioLabel(w, h) {
   return `${w / g}:${h / g}`;
 }
 
-/* 该模型能选的画幅：官方固定尺寸的只给官方；其余给整套比例库并标出官方项 */
 function ratioPool(cap) {
   const official = cap.supported_sizes || [];
   if (!official.length) return [];
@@ -391,7 +601,6 @@ function ratioPool(cap) {
   }
   const known = new Map(official.map((s) => [s, true]));
   const pool = sizeLibrary.map((e) => ({ ...e, official: known.has(e.size) }));
-  // 官方尺寸若不在库里（各家中转站可能不同），补进来
   for (const s of official) {
     if (!pool.some((e) => e.size === s)) {
       const [w, h] = s.split("x").map(Number);
@@ -449,17 +658,17 @@ function renderRatioGroup(cap) {
       box.appendChild(btn);
     }
   }
-  // 当前尺寸若不在该模型的可选范围内，退回官方第一个
   const allowed = pool.map((e) => e.size);
-  if (allowed.length && !allowed.includes(size) && !(sizeCustom && sizeCustom.value.trim())) {
+  if (allowed.length && !allowed.includes(size)) {
     size = allowed.find((s) => (cap.supported_sizes || []).includes(s)) || allowed[0];
   }
   markRatio();
 }
 
 function markRatio() {
+  const presetActive = !sizeCustom.value.trim();
   document.querySelectorAll("#ratio-group .ratio").forEach((b) => {
-    const on = b.dataset.size === size;
+    const on = presetActive && b.dataset.size === size;
     b.classList.toggle("on", on);
     b.setAttribute("aria-checked", on ? "true" : "false");
   });
@@ -486,12 +695,13 @@ function renderRequestPreview(cap) {
   if (!box) return;
   const model = (modelInput?.value || "").trim();
   if (!model) { box.hidden = true; return; }
-  const n = currentN();
+  const n = editSource ? 1 : currentN();
   const parts = [];
   const notes = [];
 
   parts.push(model);
-  if ((cap.supported_sizes || []).length) parts.push(`${size.replace("x", "×")} ${ratioLabel(...size.split("x").map(Number))}`);
+  const previewSize = currentSize();
+  if ((cap.supported_sizes || []).length) parts.push(`${previewSize.replace("x", "×")} ${ratioLabel(...previewSize.split("x").map(Number))}`);
   else notes.push("该模型族不接收画幅");
 
   parts.push(n > 1 ? `${n} 张` : "1 张");
@@ -508,8 +718,14 @@ function renderRequestPreview(cap) {
     if (val && val !== "默认") parts.push(`${name} ${val}`);
   }
   if (skipped.length) notes.push(`该模型族不接收：${skipped.join(" / ")}`);
+  const extensions = extensionParams();
+  if (extensions.negative_prompt) parts.push("反向提示词");
+  if (extensions.seed != null) parts.push(`Seed ${extensions.seed}`);
+  if (extensions.cfg_scale != null) parts.push(`CFG ${extensions.cfg_scale}`);
+  if (Object.keys(extensions).length) notes.push("扩展参数由线路决定是否生效");
 
-  parts.push(referenceFiles.length ? `图生图 ${referenceFiles.length} 张参考图` : "文生图");
+  if (editSource) parts.push("以图库原图改图");
+  else parts.push(referenceFiles.length ? `图生图 ${referenceFiles.length} 张参考图` : "文生图");
 
   const secs = estimateSeconds(model, n);
   const est = secs
@@ -543,7 +759,7 @@ function updateCapabilityUI() {
   $("capability-label").textContent = cap.family || "Generic OpenAI Compatible";
   ["quality", "background", "style", "n"].forEach((key) => {
     const row = $(`${key}-param`);
-    if (row) row.hidden = key === "n" ? !cap.n : !cap[key];
+    if (row) row.hidden = key === "n" ? Boolean(editSource) || !cap.n : !cap[key];
   });
   rebuildOptions($("quality"), cap.quality_values);
   rebuildOptions($("background"), cap.background_values);
@@ -554,8 +770,10 @@ function updateCapabilityUI() {
   renderRatioGroup(cap);
   if (sizeField && !sizeField.hidden) {
     const [w, h] = size.split("x").map(Number);
-    if (!sizeCustom || !sizeCustom.value.trim()) {
+    if (!sizeCustom.value.trim()) {
       setSizeHint(`${size.replace("x", "×")} · ${ratioLabel(w, h)}${isOfficialSize(cap, size) ? " · 官方" : ""}`);
+    } else if (SIZE_RE.test(sizeCustom.value.trim().toLowerCase())) {
+      setSizeHint(`已生效 ${currentSize()}（自定义）`);
     }
   }
 
@@ -568,6 +786,7 @@ function updateCapabilityUI() {
   }
 
   $("param-note").textContent = cap.notes || "";
+  $("edit-model-note").hidden = !editSource || Boolean(cap.image_to_image);
   renderAdvSummary(cap);
   renderReferenceNote(cap);
   renderRequestPreview(cap);
@@ -689,7 +908,7 @@ $("pf-save").addEventListener("click", async () => {
     closeProviderForm();
     setMsg(wasEdit ? "中转站已更新" : "中转站已添加并启用", "ok");
     $("need-api").hidden = !!providers.length;
-    await loadModels(); // 模型拉取结果只反映在输入框占位符，不覆盖上面的成功提示
+    await loadModels();
   } catch (e) { setMsg(e.message, "err"); }
 });
 
@@ -737,7 +956,6 @@ async function activateProvider(pid) {
 async function refreshHealth(force = false) {
   setMsg("检测中…");
   try {
-    // 一次请求探测全部线路（后端并行执行），响应里附带最新 settings
     const r = await fetch("/api/providers/health", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ force }) });
     const d = await r.json();
     if (d.error) throw new Error(d.error);
@@ -806,9 +1024,9 @@ document.querySelectorAll(".theme-btn").forEach((btn) => {
 
 const settingsEl = $("settings");
 
-/* 带退场动画地关闭弹窗（灯箱与设置共用 .lightbox 的 closing 关键帧） */
+/* 带退场动画地关闭弹窗（灯箱、设置与对比共用 .lightbox 的 closing 关键帧） */
 function closeOverlayAnimated(el, after) {
-  if (el.hidden || el.classList.contains("closing")) return;
+  if (!el || el.hidden || el.classList.contains("closing")) return;
   if (reduceMotion) {
     el.hidden = true;
     if (after) after();
@@ -816,7 +1034,7 @@ function closeOverlayAnimated(el, after) {
   }
   el.classList.add("closing");
   setTimeout(() => {
-    if (!el.classList.contains("closing")) return; // 期间被重新打开
+    if (!el.classList.contains("closing")) return;
     el.classList.remove("closing");
     el.hidden = true;
     if (after) after();
@@ -829,7 +1047,7 @@ function closeSettings() {
 }
 
 function openSettings() {
-  settingsEl.classList.remove("closing"); // 关闭动画中途重新打开
+  settingsEl.classList.remove("closing");
   settingsEl.hidden = false;
 }
 
@@ -849,7 +1067,6 @@ $("health-refresh").addEventListener("click", () => refreshHealth(true));
 /* ---------- 可搜索模型下拉（含最近使用） ---------- */
 const modelInput = $("model");
 const modelListBox = $("model-list");
-
 let modelsLoading = false;
 
 function renderModelList(filter = "") {
@@ -912,19 +1129,18 @@ async function loadModels() {
       modelInput.placeholder = "未配置 API，可手动填写模型名";
     } else {
       modelInput.placeholder = modelList.length ? "输入筛选或直接填写模型名" : "未发现生图模型，可手动填写";
-      if (modelList.length) modelInput.value = pickDefaultModel();
+      if (modelList.length && !modelInput.value.trim()) modelInput.value = pickDefaultModel();
     }
   } catch {
     modelsLoading = false;
     modelInput.placeholder = "未配置 API，可手动填写模型名";
   }
-  if (!modelListBox.hidden) renderModelList(); // 渲染完整列表，不按默认选中名过滤
+  if (!modelListBox.hidden) renderModelList(modelList.includes(modelInput.value) ? "" : modelInput.value);
   updateCapabilityUI();
   renderRailProvider();
 }
 
 /* ---------- 画廊卡片滚动进场 ---------- */
-/* 首屏卡片按序 stagger 显现；往下滚动才进入视口的卡片迟到时立即显现 */
 const revealDelays = new WeakMap();
 let revealBatchAt = 0;
 const revealObserver = !reduceMotion && "IntersectionObserver" in window
@@ -944,13 +1160,12 @@ const revealObserver = !reduceMotion && "IntersectionObserver" in window
   : null;
 
 function watchReveal(card, delay = 0) {
-  if (!revealObserver) return;   // 减少动态效果或浏览器过旧：直接显示
+  if (!revealObserver) return;
   revealDelays.set(card, delay);
   card.classList.add("reveal");
   revealObserver.observe(card);
 }
 
-/* 兜底：观察器万一没触发（容器尺寸异常等），1.5s 后强制显现，绝不留隐形卡片 */
 function revealSafetyNet() {
   setTimeout(() => {
     document.querySelectorAll("#gallery .print.reveal").forEach((c) => {
@@ -1000,26 +1215,30 @@ function filterQuery() {
   if ($("f-range").value !== "all") p.set("range", $("f-range").value);
   if ($("f-sort") && $("f-sort").value !== "newest") p.set("sort", $("f-sort").value);
   if (onlyFav) p.set("favorite", "1");
+  if (onlyFinal) p.set("final", "1");
   return p.toString();
 }
 
-async function loadHistory(p = page) {
+let historyRequest = 0;
+async function loadHistory(p = page, scrollToTop = true) {
+  const requestId = ++historyRequest;
+  const qs = filterQuery();
   try {
-    const qs = filterQuery();
-    const d = await (await fetch(`/api/history?page=${p}&page_size=${PAGE_SIZE}&${qs}`)).json();
+    const r = await fetch(`/api/history?page=${p}&page_size=${PAGE_SIZE}&${qs}`);
+    if (!r.ok) return;
+    const d = await r.json();
+    if (requestId !== historyRequest || qs !== filterQuery()) return;
     page = d.page; pages = d.pages; total = d.total;
-    wallItems = d.items.map((it) => ({ ...it }));
+    wallItems = d.items;
     const wallCountEl = $("wall-count");
     if (wallCountEl) wallCountEl.textContent = `共 ${total} 幅作品`;
     fillSelect($("f-model"), d.facets.models, "全部模型");
     fillSelect($("f-provider"), d.facets.providers, "全部来源");
     const g = $("gallery");
-    g.innerHTML = "";
-    for (const item of d.items) g.appendChild(makeCard(item, false));
-    const empty = $("empty");
-    if (empty) empty.hidden = !!d.items.length;
+    const pending = g.querySelector(".print-developing");
+    g.replaceChildren(...(pending ? [pending] : []), ...wallItems.map((item) => makeCard(item, false)));
+    updateGalleryEmpty();
     renderPager();
-    // 用历史耗时给没记录过的模型补一个速度参考，用来预估等待时间
     const known = speedMap();
     for (const it of d.items) {
       if (it.model && it.elapsed > 0 && !(known[it.model] || []).length) {
@@ -1028,12 +1247,11 @@ async function loadHistory(p = page) {
       }
     }
     renderRequestPreview(capabilityFor(modelInput.value));
-    // 滚动进场取代一次性全量动画：视口内的按序显现，视口外的滚到再显现
     revealBatchAt = performance.now();
     let vi = 0;
-    for (const card of g.querySelectorAll(".print")) watchReveal(card, Math.min(vi++, 9) * 45);
+    for (const card of g.querySelectorAll(".print[data-name]")) watchReveal(card, Math.min(vi++, 9) * 45);
     revealSafetyNet();
-    document.querySelector(".wall").scrollTo({ top: 0 });
+    if (scrollToTop) document.querySelector(".wall").scrollTo({ top: 0 });
   } catch { /* 加载失败不阻塞 */ }
 }
 
@@ -1065,11 +1283,17 @@ for (const id of ["f-model", "f-provider", "f-range", "f-sort"]) {
 
 /* 只看收藏 */
 let onlyFav = false;
+let onlyFinal = false;
 $("f-fav").addEventListener("click", () => {
   onlyFav = !onlyFav;
   $("f-fav").classList.toggle("on", onlyFav);
   $("f-fav").setAttribute("aria-pressed", String(onlyFav));
   $("f-fav").innerHTML = onlyFav ? '<span class="ft-star">★</span> 收藏中' : '<span class="ft-star">★</span> 收藏';
+  loadHistory(1);
+});
+$("f-final").addEventListener("click", () => {
+  onlyFinal = !onlyFinal;
+  $("f-final").setAttribute("aria-pressed", String(onlyFinal));
   loadHistory(1);
 });
 
@@ -1127,12 +1351,16 @@ $("batch-del").addEventListener("click", async () => {
 /* ---------- 卡片复用全部参数 ---------- */
 function reuseParamsFromItem(item) {
   if (!item) return;
+  if (editSource && !busy) setEditSource(null);
   const done = [];
   if (item.prompt) { setPrompt(item.prompt); done.push("提示词"); }
   if (item.model) { modelInput.value = item.model; done.push("模型"); }
+  updateCapabilityUI();
   if (item.size && SIZE_RE.test(item.size)) {
-    size = item.size;
-    if (sizeCustom) { sizeCustom.value = ""; sizeCustom.classList.remove("invalid"); }
+    const isPreset = ratioPool(capabilityFor(modelInput.value)).some((entry) => entry.size === item.size);
+    if (isPreset) size = item.size;
+    sizeCustom.value = isPreset ? "" : item.size;
+    sizeCustom.classList.remove("invalid");
     done.push("画幅");
   }
   for (const key of ["quality", "background", "style"]) {
@@ -1142,8 +1370,21 @@ function reuseParamsFromItem(item) {
       if (v) done.push(PARAM_LABELS[v] || v);
     }
   }
-  saveGenSettings();
+  $("negative-prompt").value = item.negative_prompt || "";
+  $("seed-input").value = item.seed ?? "";
+  $("cfg-slider").value = item.cfg_scale ?? $("cfg-slider").defaultValue;
+  $("send-cfg-scale").checked = item.cfg_scale != null;
+  $("cfg-val").textContent = Number($("cfg-slider").value).toFixed(1);
+  $("send-extension-params").checked = Boolean(item.negative_prompt || item.seed != null || item.cfg_scale != null);
+  if (item.negative_prompt) done.push("反向词");
+  if (item.seed != null) done.push("种子");
+  if (item.cfg_scale != null) done.push("CFG");
+  if (item.requested) {
+    $("n").value = item.requested;
+    markQuantity(currentN());
+  }
   updateCapabilityUI();
+  saveGenSettings();
   renderRailProvider();
   $("prompt").focus();
   setGenMsg(done.length ? `已复用：${done.join("、")}` : "这张图没有可复用的参数");
@@ -1172,6 +1413,9 @@ function makeCard(item, fresh) {
         <button class="p-action-btn p-reuse" type="button" title="复用参数">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>
         </button>
+        <button class="p-action-btn p-compare" type="button" title="加入 A/B 画面对比">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/></svg>
+        </button>
         <a href="${item.url}" class="p-action-btn p-dl" download title="下载原图">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         </a>
@@ -1180,6 +1424,7 @@ function makeCard(item, fresh) {
     <div class="meta">
       <button class="fav ${item.favorite ? "on" : ""}" type="button" title="收藏 / 取消收藏">★</button>
       <span class="model" title="${escapeHtml(model)}">${escapeHtml(model)}</span>
+      ${item.edit?.review?.final ? '<span class="edit-final-badge">成稿</span>' : ""}
       ${secs}
       ${date ? `<span class="date">${date}</span>` : ""}
     </div>`;
@@ -1215,6 +1460,11 @@ function makeCard(item, fresh) {
     reuseParamsFromItem(item);
   });
 
+  card.querySelector(".p-compare")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    openCompareModal(item);
+  });
+
   card.querySelector(".fav").addEventListener("click", (e) => {
     e.stopPropagation();
     toggleFavorite(item);
@@ -1238,13 +1488,17 @@ async function toggleFavorite(item) {
     const btn = document.querySelector(`#gallery .print[data-name="${cssEscape(item.name)}"] .fav`);
     if (btn) {
       btn.classList.toggle("on", d.favorite);
-      if (d.favorite) {           // 收藏成功：星星爆闪一下（reduced-motion 下 CSS 自动降级）
+      if (d.favorite) {
         btn.classList.remove("fav-pop");
-        void btn.offsetWidth;     // 强制重排以重启动画
+        void btn.offsetWidth;
         btn.classList.add("fav-pop");
       }
     }
-    if (!lightboxEl.hidden && lbName === item.name) renderLbFav(d.favorite);
+    if (!lightboxEl.hidden && lbItem?.name === item.name) {
+      lbItem.favorite = d.favorite;
+      renderLbFav(d.favorite);
+    }
+    if (onlyFav && !d.favorite) loadHistory(page, false);
     showToast(d.favorite ? "已加入收藏 ★" : "已移出收藏", "info");
   } catch (e) { setGenMsg("收藏失败：" + e.message); showToast("收藏失败：" + e.message, "error"); }
 }
@@ -1256,9 +1510,13 @@ function cssEscape(s) {
 /* ---------- 生成参数：记住上次的选择 ---------- */
 function saveGenSettings() {
   lsSet(SETTINGS_KEY, {
-    size, n: currentN(),
+    size, customSize: sizeCustom.value.trim().toLowerCase(), n: currentN(),
     quality: $("quality").value, background: $("background").value, style: $("style").value,
     advOpen: $("advanced-params").open,
+    negative_prompt: $("negative-prompt")?.value || "",
+    seed: $("seed-input")?.value || "",
+    cfg_scale: $("cfg-slider")?.value || "7.0",
+    send_cfg_scale: $("send-cfg-scale").checked,
   });
 }
 
@@ -1266,16 +1524,41 @@ function restoreGenSettings() {
   const s = lsGet(SETTINGS_KEY, null);
   if (!s || typeof s !== "object") return;
   if (typeof s.size === "string" && SIZE_RE.test(s.size)) size = s.size;
+  if (typeof s.customSize === "string" && SIZE_RE.test(s.customSize)) sizeCustom.value = s.customSize;
   if (Number.isFinite(+s.n)) $("n").value = String(+s.n);
   for (const key of ["quality", "background", "style"]) {
     if (typeof s[key] === "string" && [...$(key).options].some((o) => o.value === s[key])) $(key).value = s[key];
   }
   if (s.advOpen) $("advanced-params").open = true;
+  if (s.negative_prompt && $("negative-prompt")) $("negative-prompt").value = s.negative_prompt;
+  if (s.seed && $("seed-input")) $("seed-input").value = s.seed;
+  if (s.cfg_scale && $("cfg-slider")) {
+    const slider = $("cfg-slider");
+    slider.value = s.cfg_scale;
+    $("cfg-val").textContent = Number(slider.value).toFixed(1);
+    $("send-cfg-scale").checked = s.send_cfg_scale ?? Number(slider.value) !== Number(slider.defaultValue);
+  }
+}
+
+function extensionParams() {
+  if (!$("send-extension-params").checked) return {};
+  const fields = {};
+  if ($("send-cfg-scale").checked) fields.cfg_scale = Number($("cfg-slider").value);
+  const negative = $("negative-prompt").value.trim();
+  const seed = $("seed-input");
+  if (negative) fields.negative_prompt = negative;
+  if (seed.validity.valid && seed.value !== "" && Number(seed.value) >= 0) fields.seed = Number(seed.value);
+  return fields;
 }
 
 /* ---------- 画幅 ---------- */
 const sizeCustom = $("size-custom");
 const SIZE_RE = /^\d{2,5}x\d{2,5}$/;
+
+function currentSize() {
+  const custom = sizeCustom.value.trim().toLowerCase();
+  return SIZE_RE.test(custom) ? custom : size;
+}
 
 function setSizeHint(text, bad = false) {
   const el = $("size-hint");
@@ -1286,27 +1569,20 @@ function setSizeHint(text, bad = false) {
 
 if (sizeCustom) sizeCustom.addEventListener("input", () => {
   const v = sizeCustom.value.trim().toLowerCase();
+  markRatio();
   if (!SIZE_RE.test(v)) {
-    // 出现分隔符却没写完整 = 明显写错才标红，避免输入过程闪红
-    const obviouslyBad = /[x×,，]/.test(v) && !SIZE_RE.test(v);
+    const obviouslyBad = /[x×,，]/.test(v);
     sizeCustom.classList.toggle("invalid", obviouslyBad);
     setSizeHint(obviouslyBad ? "格式应为 宽x高，如 768x1344" : "", obviouslyBad);
     if (!v) {
-      markRatio();
       const [w, h] = size.split("x").map(Number);
       setSizeHint(`${size.replace("x", "×")} · ${ratioLabel(w, h)}` +
         (isOfficialSize(capabilityFor(modelInput.value), size) ? " · 官方" : ""));
     }
-    return;
+  } else {
+    sizeCustom.classList.remove("invalid");
+    setSizeHint(`已生效 ${v}（自定义）`);
   }
-  // 自定义尺寸原样透传，由中转站决定如何映射
-  sizeCustom.classList.remove("invalid");
-  document.querySelectorAll("#ratio-group .ratio").forEach((b) => {
-    b.classList.remove("on");
-    b.setAttribute("aria-checked", "false");
-  });
-  size = v;
-  setSizeHint(`已生效 ${size}（自定义）`);
   saveGenSettings();
   renderRequestPreview(capabilityFor(modelInput?.value || ""));
 });
@@ -1314,7 +1590,6 @@ if (sizeCustom) sizeCustom.addEventListener("input", () => {
 /* ---------- 生成 ---------- */
 function setGenMsg(text) { $("msg").textContent = text || ""; }
 
-/* 进度条：多张时按张数走，单张时走不确定动画 */
 function showProgress(done, total) {
   const box = $("progress");
   if (!box) return;
@@ -1322,7 +1597,7 @@ function showProgress(done, total) {
   const pct = total > 1 ? Math.round((done / total) * 100) : 0;
   box.classList.toggle("indet", total <= 1);
   $("progress-fill").style.width = total > 1 ? `${pct}%` : "";
-  $("progress-text").textContent = total > 1 ? `${done}/${total} 张 · ${pct}%` : "生成中…";
+  $("progress-text").textContent = total > 1 ? `${done}/${total} 张 · ${pct}%` : "显影中…";
 }
 
 function hideProgress() {
@@ -1348,7 +1623,6 @@ function addReference(file) {
 
 function renderReferenceThumbs() {
   const box = $("reference-thumbs");
-  // 缩略图 URL 用完即回收，避免长会话下 objectURL 累积泄漏
   refObjectUrls.forEach((u) => URL.revokeObjectURL(u));
   refObjectUrls = [];
   box.innerHTML = "";
@@ -1378,16 +1652,37 @@ function renderReferenceThumbs() {
 function clearReference() {
   referenceFiles = [];
   $("reference-input").value = "";
-  renderReferenceThumbs();  // 内部会回收全部 objectURL
+  renderReferenceThumbs();
   updateCapabilityUI();
 }
+
+function setEditSource(item) {
+  if (item && item.name !== editSource?.name) {
+    $("edit-change").value = "";
+    $("edit-keep").value = "";
+  }
+  editSource = item;
+  $("edit-draft").hidden = !item;
+  $("prompt-workshop").hidden = Boolean(item);
+  if (item) {
+    $("edit-source-image").src = item.url;
+    $("edit-source-name").textContent = item.name;
+  } else {
+    $("edit-source-image").removeAttribute("src");
+  }
+  if (!busy) $("go").querySelector(".go-text").textContent = item ? "生成改图" : "开始生成";
+  setGenMsg("");
+  updateCapabilityUI();
+}
+
+$("edit-cancel").addEventListener("click", () => setEditSource(null));
 
 $("reference-add").addEventListener("click", () => {
   if (!$("reference-add").classList.contains("disabled")) $("reference-input").click();
 });
 $("reference-input").addEventListener("change", (e) => {
   [...e.target.files].forEach(addReference);
-  e.target.value = ""; // 清空，允许再次选择同一文件
+  e.target.value = "";
 });
 $("reference-box").addEventListener("dragover", (e) => { e.preventDefault(); $("reference-box").classList.add("dragover"); });
 $("reference-box").addEventListener("dragleave", () => $("reference-box").classList.remove("dragover"));
@@ -1402,18 +1697,30 @@ $("prompt").addEventListener("paste", (e) => {
   if (files.length) { e.preventDefault(); files.forEach(addReference); }
 });
 
-/* ---------- 生成任务 ---------- */
-/* 一条提示词出多张时走任务队列：能边出边看，也能中途取消 */
+/* ---------- 生成任务 & 暗房显影动态状态机 ---------- */
 let currentTaskId = null;
-let taskPollTimer = null;
 const GO_HTML = '<span class="go-spark" aria-hidden="true">✦</span><span class="go-text">开始生成</span><kbd class="go-kbd">Ctrl ↵</kbd>';
+
+const DARKROOM_STAGES = [
+  { at: 0, text: "潜空间初始化 · 构思构图" },
+  { at: 3, text: "扩散去噪采样 · 光影凝聚" },
+  { at: 7, text: "纹理细节显影 · 银盐沉淀" },
+  { at: 12, text: "色彩校正调优 · 成片定影" }
+];
+
+function getDarkroomStageText(secondsElapsed, targetImages, currentCount) {
+  const stage = [...DARKROOM_STAGES].reverse().find(s => secondsElapsed >= s.at) || DARKROOM_STAGES[0];
+  if (targetImages > 1) {
+    return `[${currentCount}/${targetImages}] ${stage.text}`;
+  }
+  return stage.text;
+}
 
 function makeDevelopingCard(label) {
   const card = document.createElement("div");
-  card.className = "print";
-  // 不接收画幅的模型族（如 grok image）用 1:1 占位，不带出上一个模型遗留的 size
+  card.className = "print print-developing";
   const devCap = capabilityFor(modelInput?.value || "");
-  const [w, h] = (devCap.size_mode === "none" ? "1024x1024" : size).split("x");
+  const [w, h] = (devCap.size_mode === "none" ? "1024x1024" : currentSize()).split("x");
   card.innerHTML = `
     <div class="developing" style="aspect-ratio:${w}/${h}">
       <div class="red-lamp"></div>
@@ -1427,154 +1734,170 @@ function setGoIdle() {
   busy = false;
   $("go").disabled = false;
   $("go").innerHTML = GO_HTML;
+  if (editSource) $("go").querySelector(".go-text").textContent = "生成改图";
+  $("edit-cancel").disabled = false;
 }
 
-function bumpWall(count) {
-  if (!count) return;
-  total += count;
-  pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  renderPager();
-  const empty = $("empty");
-  if (empty) empty.hidden = true;
-  const wallCountEl = $("wall-count");
-  if (wallCountEl) wallCountEl.textContent = `共 ${total} 幅作品`;
+function updateGalleryEmpty() {
+  const hasImages = Boolean(wallItems.length || $("gallery").querySelector(".print-developing"));
+  $("empty").hidden = hasImages || onlyFinal;
+  $("empty-final").hidden = hasImages || !onlyFinal;
+}
+
+function appendGeneratedImages(images) {
+  if (page !== 1 || filterQuery()) return;
+  const fresh = images.filter((item) => item.name && !wallItems.some((existing) => existing.name === item.name));
+  for (const item of fresh) {
+    const card = makeCard(item, true);
+    card.querySelector("img").classList.add("develop");
+    $("gallery").prepend(card);
+    wallItems.unshift(item);
+  }
 }
 
 async function cancelCurrentTask() {
-  if (!currentTaskId) return;
+  const id = currentTaskId;
+  if (!id) return;
   setGenMsg("正在取消，当前这张出完就停…");
   $("go").disabled = true;
   $("go").innerHTML = "正在取消…";
   try {
-    await fetch("/api/task/cancel", {
+    const r = await fetch("/api/task/cancel", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: currentTaskId }),
+      body: JSON.stringify({ id }),
     });
-  } catch { /* 下次轮询会拿到最终状态 */ }
+    if (!r.ok) throw new Error("取消请求失败");
+  } catch {
+    if (currentTaskId !== id) return;
+    $("go").disabled = false;
+    $("go").textContent = "取消本次生成";
+    setGenMsg("取消请求发送失败，可以再次尝试取消");
+  }
 }
 
-function stopPolling() {
-  if (taskPollTimer) clearInterval(taskPollTimer);
-  taskPollTimer = null;
-  currentTaskId = null;
-}
-
-function taskLabel(t, targetImages) {
+function taskLabel(t, targetImages, seconds) {
   if (t.status === "cancelling") return "正在取消…";
-  if (targetImages > 1) return `已出 ${t.image_count}/${targetImages} 张`;
-  return "显影中";
+  return getDarkroomStageText(seconds, targetImages, t.image_count || 0);
 }
 
-async function runTask(options, card, prompt, timer, n) {
+async function runTask(options, card, n, onImages) {
   const r = await fetch("/api/generate-task", options);
   const d = await r.json();
-  if (d.error) throw new Error(d.error);
+  if (!r.ok || !d.task_id) throw new Error(d.error || "无法创建生成任务");
   currentTaskId = d.task_id;
-  $("go").innerHTML = "取消本次生成";
+  $("go").textContent = "取消本次生成";
   $("go").disabled = false;
   const labelEl = card.querySelector(".dev-label");
   const targetImages = d.target_images || d.target_n || n || 1;
-  let rendered = 0;      // 已从任务快照消费掉的条目数（含拉取失败的）
-  let namedTotal = 0;    // 真正落盘、有文件名的图片数（用于计数与收尾提示）
-  let closed = false;
-
-  const finish = (t, fallbackMsg) => {
-    if (closed) return;
-    closed = true;
-    card.remove();
-    clearInterval(timer);
-    stopPolling();
-    hideProgress();
-    setGoIdle();
-    const okCount = namedTotal;
-    const errors = (t && t.errors) || [];
-    if (fallbackMsg) setGenMsg(fallbackMsg);
-    else if (!t) setGenMsg("任务已结束");
-    else if (t.status === "cancelled") setGenMsg(`已取消：本次共出图 ${okCount} 张`);
-    else if (t.status === "failed") setGenMsg(`生成失败：${errors[0]?.error || "未知错误"}`);
-    else if (t.notice) setGenMsg(t.notice);
-    else setGenMsg(`完成 ${okCount} 张`);
-    bumpWall(namedTotal);
-    if (rendered) pushPromptHistory(prompt);
-    pushRecentModel((t && t.model) || "");
-    if (t && t.images && t.images.length) {
-      const secs = t.images.map((i) => i.elapsed).filter((v) => v > 0);
-      if (secs.length) noteSpeed(t.model, secs.reduce((a, b) => a + b, 0) / secs.length);
-    }
-    renderRailProvider();
-    renderRequestPreview(capabilityFor((t && t.model) || modelInput.value));
-    // 与同步路径保持一致：只在真的出过图后才清参考图，失败时保留以便直接重试
-    if (namedTotal && referenceFiles.length) clearReference();
-  };
-
-  taskPollTimer = setInterval(async () => {
-    if (closed) return;
-    if (!currentTaskId) { finish(null, "任务已结束"); return; }
+  let rendered = 0;
+  const taskStart = Date.now();
+  while (true) {
+    await new Promise((resolve) => setTimeout(resolve, 800));
     let t;
     try {
-      t = await (await fetch(`/api/task?id=${currentTaskId}`)).json();
-    } catch { return; } // 临时网络抖动不中断任务
-    if (t.error) { finish(null, `任务状态已失效（${t.error}），已生成的图片仍保留在墙上`); return; }
-    labelEl.textContent = taskLabel(t, targetImages);
+      const status = await fetch(`/api/task?id=${encodeURIComponent(d.task_id)}`);
+      if (status.status === 404) t = { status: "missing" };
+      else if (status.ok) t = await status.json();
+    } catch { /* 短暂断线后重新查询同一个任务 */ }
+    if (!t) continue;
+    if (t.status === "missing") throw new Error("任务状态已失效，已保存的图片可在画廊中查看");
+    const curSec = Math.round((Date.now() - taskStart) / 1000);
+    const newText = taskLabel(t, targetImages, curSec);
+    if (labelEl && labelEl.textContent !== newText) {
+      labelEl.textContent = newText;
+    }
     showProgress(t.image_count || 0, targetImages);
     const freshImgs = (t.images || []).slice(rendered);
-    for (let i = freshImgs.length - 1; i >= 0; i--) {
-      const c = makeCard(freshImgs[i], true);
-      c.querySelector("img").classList.add("develop");
-      $("gallery").prepend(c);
-      if (freshImgs[i].name) namedTotal += 1;  // 上游 URL 拉取失败的条目不算张数
-    }
     if (freshImgs.length) {
-      wallItems.unshift(...freshImgs);
+      onImages(freshImgs);
       rendered = t.images.length;
     }
-    if (["done", "failed", "cancelled"].includes(t.status)) finish(t);
-  }, 800);
+    if (["done", "failed", "cancelled"].includes(t.status)) return t;
+  }
 }
 
 async function gen() {
   if (busy) return;
-  // 整段提示词原样使用：写几段都只算一张图的提示词，多张由「数量」决定
-  const prompt = $("prompt").value.trim();
-  if (!prompt) { setGenMsg("请先写提示词"); $("prompt").focus(); return; }
-  if (!modelInput.value.trim()) { setGenMsg("请先选择或填写模型"); modelInput.focus(); return; }
+  const submittedEdit = editSource;
+  const prompt = submittedEdit ? "" : $("prompt").value.trim();
+  const change = submittedEdit ? $("edit-change").value.trim() : "";
+  const model = modelInput.value.trim();
+  if (submittedEdit && !change) { setGenMsg("请填写要改什么"); $("edit-change").focus(); return; }
+  if (!submittedEdit && !prompt) { setGenMsg("请先写提示词"); $("prompt").focus(); return; }
+  if (!model) { setGenMsg("请先选择或填写模型"); modelInput.focus(); return; }
   if (prompt.length > (limits.max_prompt_chars || 8000)) {
     setGenMsg(`提示词过长（${prompt.length} 字），请控制在 ${limits.max_prompt_chars} 字以内`);
     return;
   }
   const customRaw = sizeCustom?.value.trim() || "";
-  if (customRaw && !SIZE_RE.test(customRaw.toLowerCase())) {
+  const cap = capabilityFor(model);
+  if (submittedEdit && !cap.image_to_image) {
+    setGenMsg("请先选择支持图生图的模型");
+    modelInput.focus();
+    return;
+  }
+  if (cap.size_mode !== "none" && customRaw && !SIZE_RE.test(customRaw.toLowerCase())) {
     setGenMsg("自定义画幅格式应为 宽x高，如 768x1344；可清空输入框改用预设");
     sizeCustom.classList.add("invalid");
-    return; // 不静默回退，避免用户以为发的是自定义尺寸
+    return;
   }
-  const n = currentN();
+  if ($("send-extension-params").checked && !$("seed-input").validity.valid) {
+    $("advanced-params").open = true;
+    $("seed-input").reportValidity();
+    return;
+  }
+  const n = submittedEdit ? 1 : currentN();
+  const submittedReferences = submittedEdit ? [] : [...referenceFiles];
+
+  // 触发相机快门声
+  playShutterSound();
 
   busy = true;
   $("go").disabled = true;
+  $("edit-cancel").disabled = true;
   setGenMsg("");
-  const emptyEl = $("empty");
-  if (emptyEl) emptyEl.hidden = true;
-
-  const useQueue = n > 1;   // 多张才需要轮询进度；单张直接同步等结果
-  const card = makeDevelopingCard(n > 1 ? `已出 0/${n} 张` : "显影中");
+  const useQueue = n > 1 || Boolean(submittedEdit);
+  const card = makeDevelopingCard(DARKROOM_STAGES[0].text);
   $("gallery").prepend(card);
+  updateGalleryEmpty();
   enterCard(card);
   const timeEl = card.querySelector(".dev-time");
+  const labelEl = card.querySelector(".dev-label");
   const t0 = Date.now();
-  const timer = setInterval(() => { timeEl.textContent = `${Math.round((Date.now() - t0) / 1000)}s`; }, 500);
+  const timer = setInterval(() => {
+    const elapsed = Math.round((Date.now() - t0) / 1000);
+    timeEl.textContent = `${elapsed}s`;
+    if (useQueue) return;
+    const stageTxt = getDarkroomStageText(elapsed, n, 0);
+    if (labelEl && labelEl.textContent !== stageTxt) {
+      if (gsapOK) {
+        gsap.to(labelEl, { opacity: 0.5, y: -2, duration: 0.15, onComplete: () => {
+          labelEl.textContent = stageTxt;
+          gsap.to(labelEl, { opacity: 1, y: 0, duration: 0.2, ease: "power1.out" });
+        }});
+      } else {
+        labelEl.textContent = stageTxt;
+      }
+    }
+  }, 500);
   showProgress(0, n);
 
-  const cap = capabilityFor(modelInput.value.trim());
-  const fields = { prompt, model: modelInput.value.trim(),
-    quality: $("quality").value, background: $("background").value, style: $("style").value, n: String(n) };
-  // grok 等不接收画幅的模型族：UI 已隐藏画幅选择，残留的全局 size 不能带出去
-  if (cap.size_mode !== "none") fields.size = size;
+  const fields = { model, quality: $("quality").value, background: $("background").value,
+    style: $("style").value, n: String(n), ...extensionParams() };
+  if (submittedEdit) {
+    fields.edit_parent = submittedEdit.name;
+    fields.edit_change = change;
+    fields.edit_keep = $("edit-keep").value.trim();
+  } else {
+    fields.prompt = prompt;
+  }
+  if (cap.size_mode !== "none") fields.size = currentSize();
+
   const options = { method: "POST" };
-  if (referenceFiles.length) {
+  if (submittedReferences.length) {
     const form = new FormData();
     Object.entries(fields).forEach(([key, value]) => form.append(key, value));
-    referenceFiles.forEach((f) => form.append("image", f, f.name || "reference.png"));
+    submittedReferences.forEach((f) => form.append("image", f, f.name || "reference.png"));
     options.body = form;
   } else {
     options.headers = { "Content-Type": "application/json" };
@@ -1582,62 +1905,62 @@ async function gen() {
   }
 
   try {
+    let result;
     if (useQueue) {
-      await runTask(options, card, prompt, timer, n);
-      return; // 轮询接管计时与收尾
+      result = await runTask(options, card, n, appendGeneratedImages);
+    } else {
+      const r = await fetch("/api/generate", options);
+      result = await r.json();
+      if (result.warning) showToast(result.warning, "error");
+      if (!r.ok || result.error) throw new Error(result.error || "生成请求失败");
+      appendGeneratedImages(result.images || []);
     }
-    const r = await fetch("/api/generate", options);
-    const d = await r.json();
-    if (d.error) {
-      if (d.warning) showToast(d.warning, "error");
-      throw new Error(d.error);
+    const images = (result.images || []).filter((item) => item.name);
+    if (images.length) {
+      if (prompt) pushPromptHistory(prompt);
+      pushRecentModel(model);
+      const secs = images.map((item) => item.elapsed).filter((value) => value > 0);
+      if (secs.length) noteSpeed(model, secs.reduce((sum, value) => sum + value, 0) / secs.length);
+      playChimeSound();
+      if (submittedReferences.length && referenceFiles.length === submittedReferences.length &&
+          referenceFiles.every((file, i) => file === submittedReferences[i])) clearReference();
     }
-    const images = d.images || [];
-    if (!images.length) throw new Error("上游未返回图片");
-    const withResponseMeta = (img) => ({ ...img, model: d.model, elapsed: d.elapsed, prompt: d.prompt,
-      provider: d.provider, provider_id: d.provider_id, mode: d.mode,
-      reference_used: !!img.reference_used, reference_count: img.reference_count || 0,
-      requested: d.requested || 1,
-      favorite: false, failover: !!d.failover, failover_from: d.failover_from || "" });
-    const fresh = makeCard(withResponseMeta(images[0]), true);
-    fresh.querySelector("img").classList.add("develop");
-    card.replaceWith(fresh);
-    for (let i = images.length - 1; i >= 1; i--) $("gallery").prepend(makeCard(withResponseMeta(images[i]), true));
-    wallItems.unshift(...images.map(withResponseMeta));
-    const namedCount = images.filter((i) => i.name).length;  // 拉取失败的远端条目不计数
-    bumpWall(namedCount);
-    pushPromptHistory(prompt);
-    pushRecentModel(d.model);
-    noteSpeed(d.model, d.elapsed);
-    renderRailProvider();
-    renderRequestPreview(capabilityFor(d.model));
-    setGenMsg(d.notice || `完成 ${namedCount} 张 · 耗时 ${d.elapsed}s`);
-    if (d.warning) showToast(d.warning, "error");
-    if (referenceFiles.length) clearReference();
+    if (submittedEdit && images.length && result.status !== "cancelled") {
+      setEditSource(null);
+      openCompareModal(submittedEdit, images[0], true);
+    }
+    if (result.status === "cancelled") setGenMsg(`已取消：本次共出图 ${images.length} 张`);
+    else if (result.status === "failed") setGenMsg(`生成失败：${result.errors?.[0]?.error || "未知错误"}`);
+    else if (result.notice) setGenMsg(result.notice);
+    else setGenMsg(`完成 ${images.length} 张${useQueue ? "" : ` · 耗时 ${result.elapsed}s`}`);
   } catch (e) {
-    card.remove();
     setGenMsg("出错：" + e.message);
   } finally {
-    if (!currentTaskId) {
-      clearInterval(timer);
-      hideProgress();
-      setGoIdle();
-    }
+    card.remove();
+    currentTaskId = null;
+    clearInterval(timer);
+    hideProgress();
+    setGoIdle();
+    updateGalleryEmpty();
+    renderRailProvider();
+    renderRequestPreview(capabilityFor(modelInput.value));
+    loadHistory(page, false);
   }
 }
 
-/* ---------- 灯箱：缩放 + 平移 ---------- */
+/* ---------- 灯箱：缩放 + 平移 + 惯性滑动 + Minimap 雷达 ---------- */
 const lightboxEl = $("lightbox");
 const lbImg = $("lb-img");
 const stage = document.querySelector(".lightbox .stage");
 let scale = 1, tx = 0, ty = 0;
-let lbName = null;
+let lbItem = null;
 const MIN_SCALE = 0.2, MAX_SCALE = 10;
 
 function applyTransform(instant = false) {
   lbImg.style.transition = instant ? "none" : "";
   lbImg.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
   $("zoom-level").textContent = `${Math.round(scale * 100)}%`;
+  updateMinimap();
 }
 
 function resetZoom() { scale = 1; tx = 0; ty = 0; applyTransform(); }
@@ -1677,11 +2000,22 @@ function zoomAtCenter(factor) {
   zoomAt(r.left + r.width / 2, r.top + r.height / 2, factor);
 }
 
+/* 平移带惯性物理滑动 (Smooth Pan with Inertia) */
 let panning = false, lastX = 0, lastY = 0;
+let vx = 0, vy = 0;
+let lastMoveTime = 0;
+let inertiaRaf = null;
+
+function stopInertia() {
+  if (inertiaRaf) { cancelAnimationFrame(inertiaRaf); inertiaRaf = null; }
+}
 
 stage.addEventListener("pointerdown", (e) => {
   if (scale <= 1) return;
+  stopInertia();
   panning = true; lastX = e.clientX; lastY = e.clientY;
+  lastMoveTime = performance.now();
+  vx = 0; vy = 0;
   stage.classList.add("panning");
   lbImg.classList.add("dragging");
   stage.setPointerCapture(e.pointerId);
@@ -1689,28 +2023,141 @@ stage.addEventListener("pointerdown", (e) => {
 
 stage.addEventListener("pointermove", (e) => {
   if (!panning) return;
-  tx += e.clientX - lastX;
-  ty += e.clientY - lastY;
-  lastX = e.clientX; lastY = e.clientY;
+  const now = performance.now();
+  const dt = Math.max(1, now - lastMoveTime);
+  const dx = e.clientX - lastX;
+  const dy = e.clientY - lastY;
+  tx += dx;
+  ty += dy;
+  vx = dx / dt;
+  vy = dy / dt;
+  lastX = e.clientX;
+  lastY = e.clientY;
+  lastMoveTime = now;
   clampPan();
   applyTransform(true);
 });
 
 stage.addEventListener("pointerup", () => {
+  if (!panning) return;
   panning = false;
   stage.classList.remove("panning");
   lbImg.classList.remove("dragging");
+
+  const speed = Math.hypot(vx, vy);
+  if (speed > 0.08) {
+    let curVx = vx * 16;
+    let curVy = vy * 16;
+    const friction = 0.92;
+    function stepInertia() {
+      if (Math.hypot(curVx, curVy) < 0.2) return;
+      tx += curVx;
+      ty += curVy;
+      curVx *= friction;
+      curVy *= friction;
+      clampPan();
+      applyTransform(true);
+      inertiaRaf = requestAnimationFrame(stepInertia);
+    }
+    inertiaRaf = requestAnimationFrame(stepInertia);
+  }
 });
 
-lbImg.addEventListener("dblclick", () => (scale > 1.01 ? resetZoom() : zoomAtCenter(2.5)));
+lbImg.addEventListener("dblclick", (e) => {
+  if (scale > 1.05) {
+    resetZoom();
+  } else {
+    zoomAt(e.clientX, e.clientY, 2.5);
+  }
+});
+
+/* ---------- Minimap Radar 雷达导航图 ---------- */
+function updateMinimap() {
+  const minimap = $("lb-minimap");
+  const canvas = $("lb-minimap-canvas");
+  const vp = $("lb-minimap-viewport");
+  if (!minimap || !canvas || !vp || !lbImg || !stage) return;
+
+  if (scale <= 1.05) {
+    minimap.style.opacity = "0";
+    minimap.style.pointerEvents = "none";
+    return;
+  }
+
+  minimap.style.opacity = "1";
+  minimap.style.pointerEvents = "auto";
+
+  const ctx = canvas.getContext("2d");
+  if (lbImg.naturalWidth && lbImg.naturalHeight) {
+    const nw = lbImg.naturalWidth;
+    const nh = lbImg.naturalHeight;
+    const maxW = 120, maxH = 80;
+    const r = Math.min(maxW / nw, maxH / nh);
+    const cw = Math.round(nw * r);
+    const ch = Math.round(nh * r);
+    if (canvas.width !== cw || canvas.height !== ch) {
+      canvas.width = cw;
+      canvas.height = ch;
+    }
+    ctx.clearRect(0, 0, cw, ch);
+    try {
+      ctx.drawImage(lbImg, 0, 0, cw, ch);
+    } catch {}
+
+    const sw = stage.clientWidth;
+    const sh = stage.clientHeight;
+    const iw = lbImg.offsetWidth * scale;
+    const ih = lbImg.offsetHeight * scale;
+    if (iw <= 0 || ih <= 0) return;
+
+    const x0 = (sw / 2 - tx - iw / 2);
+    const y0 = (sh / 2 - ty - ih / 2);
+    const nx0 = Math.max(0, -x0 / iw);
+    const ny0 = Math.max(0, -y0 / ih);
+    const nx1 = Math.min(1, (sw - x0) / iw);
+    const ny1 = Math.min(1, (sh - y0) / ih);
+
+    const vpL = nx0 * cw;
+    const vpT = ny0 * ch;
+    const vpW = Math.max(6, (nx1 - nx0) * cw);
+    const vpH = Math.max(6, (ny1 - ny0) * ch);
+
+    vp.style.left = `${vpL}px`;
+    vp.style.top = `${vpT}px`;
+    vp.style.width = `${vpW}px`;
+    vp.style.height = `${vpH}px`;
+  }
+}
+
+function initMinimapRadar() {
+  const minimap = $("lb-minimap");
+  const canvas = $("lb-minimap-canvas");
+  if (!minimap || !canvas) return;
+
+  const onMinimapClick = (e) => {
+    const rect = canvas.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    const nx = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const ny = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+
+    const iw = lbImg.offsetWidth * scale;
+    const ih = lbImg.offsetHeight * scale;
+
+    tx = -(nx - 0.5) * iw;
+    ty = -(ny - 0.5) * ih;
+    clampPan();
+    applyTransform(true);
+  };
+
+  minimap.addEventListener("click", onMinimapClick);
+}
 
 /* ---------- 灯箱开关 + 信息面板 + 左右切换 ---------- */
-let lbIndex = -1;
-
 function renderLbFav(on) { $("lb-fav").textContent = on ? "★ 已收藏" : "☆ 收藏"; }
 
 function fillLbInfo(item) {
   $("lb-model").textContent = item.model || "—";
+  if ($("lb-seed")) $("lb-seed").textContent = item.seed ?? "—";
   $("lb-provider").textContent = item.provider || "—";
   $("lb-time").textContent = item.created_time || "—";
   $("lb-elapsed").textContent = item.elapsed != null ? `${item.elapsed} 秒` : "—";
@@ -1719,7 +2166,8 @@ function fillLbInfo(item) {
     : "—";
   const params = $("lb-params");
   if (params) {
-    const list = [["质量", item.quality], ["背景", item.background], ["风格", item.style]]
+    const list = [["质量", item.quality], ["背景", item.background], ["风格", item.style],
+      ["请求 CFG", item.cfg_scale], ["请求反向提示词", item.negative_prompt]]
       .filter(([, v]) => v)
       .map(([k, v]) => `${k} ${PARAM_LABELS[v] || v}`);
     params.textContent = list.length ? list.join(" · ") : "默认（未附加参数）";
@@ -1777,6 +2225,7 @@ function extractPalette(imgEl) {
         const chip = document.createElement("button");
         chip.type = "button";
         chip.className = "palette-chip";
+        chip.dataset.hex = hex;
         chip.style.backgroundColor = hex;
         chip.title = `点击复制色值 ${hex}`;
         chip.addEventListener("click", async () => {
@@ -1785,77 +2234,149 @@ function extractPalette(imgEl) {
         });
         palEl.appendChild(chip);
       });
-    } catch {
-      // 跨域或损坏图片忽略
-    }
+    } catch {}
   };
   tempImg.src = imgEl.src;
 }
 
-function showLbAt(i) {
-  if (!wallItems.length) return;
-  lbIndex = ((i % wallItems.length) + wallItems.length) % wallItems.length; // 循环
-  const item = wallItems[lbIndex];
-  lbName = item.name;
+let lbParent = null;
+
+function renderLightboxVersions(item, children = []) {
+  const review = item.edit?.review;
+  const info = $("lb-edit-status");
+  const links = $("lb-version-links");
+  $("lb-versions").hidden = !item.edit && !children.length;
+  $("lb-review").hidden = !item.edit;
+  info.hidden = !review;
+  if (review) {
+    const passed = review.checks.filter(Boolean).length;
+    const status = review.final ? "已标记成稿" : passed === review.checks.length ? "已验收" : "验收未通过";
+    info.textContent = review.saved_at ? `${passed} / ${review.checks.length} 项通过 · ${status}` : "待验收";
+  }
+  links.replaceChildren();
+  for (const [label, version] of [["查看原图", lbParent], ...children.map((child) => ["查看衍生版", child])]) {
+    if (!version) continue;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "zoom-btn wide edit-version-link";
+    button.textContent = `${label} · ${version.name}${version.edit?.review?.final ? " · 成稿" : ""}`;
+    button.addEventListener("click", () => showLightboxItem(version));
+    links.append(button);
+  }
+}
+
+async function loadLightboxVersions(item) {
+  try {
+    const res = await fetch(`/api/history/versions?name=${encodeURIComponent(item.name)}`);
+    if (!res.ok) throw new Error("无法加载改图版本");
+    const data = await res.json();
+    if (lbItem !== item || lightboxEl.hidden) return;
+    item.edit = data.item.edit;
+    lbParent = data.parent;
+    renderLightboxVersions(item, data.children);
+    $("lb-review").disabled = false;
+  } catch {
+    if (lbItem !== item || lightboxEl.hidden || !item.edit) return;
+    $("lb-edit-status").hidden = false;
+    $("lb-edit-status").textContent = "版本记录加载失败，重新打开照片可再试。";
+  }
+}
+
+function showLightboxItem(item) {
+  lbItem = { ...item };
+  lbParent = null;
   lbImg.src = item.url;
   $("lb-dl").href = item.url;
   $("lb-name").textContent = item.name || item.url.split("/").pop();
   fillLbInfo(item);
+  const useAsSource = /\.(png|jpe?g|webp)$/i.test(item.name || "");
+  $("lb-edit").disabled = !useAsSource;
+  $("lb-edit").title = useAsSource ? "" : "改图原图仅支持 PNG、JPEG 或 WEBP";
+  $("lb-review").disabled = true;
+  renderLightboxVersions(lbItem);
+  if (item.name) loadLightboxVersions(lbItem);
   extractPalette(lbImg);
   resetZoom();
 }
 
-function openLightbox(url, name) {
-  const i = wallItems.findIndex((it) => it.url === url || it.name === name);
-  if (i >= 0) showLbAt(i);
-  else {
-    lbName = name;
-    lbImg.src = url;
-    $("lb-dl").href = url;
-    $("lb-name").textContent = name || url.split("/").pop();
-    lbIndex = -1;
-    fillLbInfo({}); // 找不到条目时清空面板，避免残留上一张的信息
-    extractPalette(lbImg);
-  }
-  lightboxEl.classList.remove("closing"); // 关闭动画中途重新打开
+function moveLightbox(offset) {
+  if (!wallItems.length) return;
+  const current = wallItems.findIndex((item) => item.name === lbItem?.name);
+  const start = current < 0 && offset < 0 ? 0 : current;
+  const index = (start + offset + wallItems.length) % wallItems.length;
+  showLightboxItem(wallItems[index]);
+}
+
+function openLightboxItem(item) {
+  lightboxEl.classList.remove("closing");
   lightboxEl.hidden = false;
-  if (gsapOK) gsap.from(".lightbox .frame", { y: 18, autoAlpha: 0, duration: 0.3, ease: "power2.out", clearProps: "all" });
+  showLightboxItem(item);
+  if (gsapOK) gsap.from(lightboxEl.querySelector(".frame"), { y: 18, autoAlpha: 0, duration: 0.3, ease: "power2.out", clearProps: "all" });
+}
+
+function openLightbox(url, name) {
+  openLightboxItem(wallItems.find((item) => item.url === url || (name && item.name === name)) || { url, name });
 }
 
 function closeLightbox() {
   closeOverlayAnimated(lightboxEl, () => {
+    lbItem = null;
     lbImg.src = "";
     const pal = $("lb-palette");
     if (pal) pal.innerHTML = "";
   });
 }
 
-$("lb-prev").addEventListener("click", () => showLbAt(lbIndex - 1));
-$("lb-next").addEventListener("click", () => showLbAt(lbIndex + 1));
+$("lb-prev").addEventListener("click", () => moveLightbox(-1));
+$("lb-next").addEventListener("click", () => moveLightbox(1));
 $("lb-close").addEventListener("click", closeLightbox);
 lightboxEl.addEventListener("click", (e) => { if (e.target === lightboxEl) closeLightbox(); });
 
+function openShortcutsModal() {
+  const modal = $("shortcuts-modal");
+  if (!modal) return;
+  modal.classList.remove("closing");
+  modal.hidden = false;
+  if (gsapOK) {
+    gsap.from(".shortcuts-frame", { y: 20, autoAlpha: 0, duration: 0.32, ease: "power2.out", clearProps: "all" });
+  }
+}
+
+function closeShortcutsModal() {
+  const modal = $("shortcuts-modal");
+  if (!modal || modal.hidden) return;
+  closeOverlayAnimated(modal);
+}
+
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
-    if (!lightboxEl.hidden) closeLightbox();
+    if (!$("shortcuts-modal")?.hidden) closeShortcutsModal();
+    else if (!$("compare-modal")?.hidden) closeCompareModal();
+    else if (!lightboxEl.hidden) closeLightbox();
     else if (!settingsEl.hidden) closeSettings();
     else if (batchMode) setBatchMode(false);
     return;
   }
+  if ((e.key === "?" || (e.shiftKey && e.key === "/")) && !["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName)) {
+    if (!lightboxEl.hidden || !settingsEl.hidden || !$("compare-modal")?.hidden) return;
+    e.preventDefault();
+    openShortcutsModal();
+    return;
+  }
   if (e.key === "/" && !["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName)) {
-    if (!lightboxEl.hidden || !settingsEl.hidden) return; // 灯箱/设置打开时不抢按键
+    if (!lightboxEl.hidden || !settingsEl.hidden || !$("compare-modal")?.hidden || !$("shortcuts-modal")?.hidden) return;
     e.preventDefault();
     $("f-q")?.focus();
     return;
   }
   if (lightboxEl.hidden) return;
-  if (e.key === "ArrowLeft") showLbAt(lbIndex - 1);
-  if (e.key === "ArrowRight") showLbAt(lbIndex + 1);
+  if (e.key === "ArrowLeft") moveLightbox(-1);
+  if (e.key === "ArrowRight") moveLightbox(1);
+  if (e.key.toLowerCase() === "f") { e.preventDefault(); resetZoom(); }
 });
 
 $("lb-copy").addEventListener("click", async () => {
-  const item = wallItems[lbIndex];
-  const text = item?.prompt || "";
+  const text = lbItem?.prompt || "";
   if (!text) return;
   try {
     await navigator.clipboard.writeText(text);
@@ -1874,36 +2395,541 @@ $("lb-copy").addEventListener("click", async () => {
   setTimeout(() => { btn.textContent = old; }, 1200);
 });
 
+$("lb-copy-prompt-btn")?.addEventListener("click", () => $("lb-copy").click());
+
+$("lb-copy-model")?.addEventListener("click", async () => {
+  const txt = $("lb-model")?.textContent;
+  if (txt && txt !== "—") {
+    try { await navigator.clipboard.writeText(txt); } catch {}
+    showToast(`已复制模型名称: ${txt}`, "success");
+  }
+});
+
+$("lb-copy-seed")?.addEventListener("click", async () => {
+  const txt = $("lb-seed")?.textContent;
+  if (txt && txt !== "—") {
+    try { await navigator.clipboard.writeText(txt); } catch {}
+    showToast(`已复制随机种子: ${txt}`, "success");
+  }
+});
+
 $("lb-fav").addEventListener("click", () => {
-  const item = wallItems[lbIndex];
-  if (item?.name) toggleFavorite(item);
+  if (lbItem?.name) toggleFavorite(lbItem);
 });
 
 $("lb-reuse").addEventListener("click", () => {
-  const item = wallItems[lbIndex];
-  if (!item) return;
-  reuseParamsFromItem(item);
+  if (!lbItem) return;
+  reuseParamsFromItem(lbItem);
+  closeLightbox();
+});
+
+$("lb-edit").addEventListener("click", () => {
+  if (!lbItem) return;
+  if (busy) {
+    showToast("当前生成任务结束后可开启改图", "info");
+    return;
+  }
+  setEditSource(lbItem);
+  closeLightbox();
+  if (document.body.classList.contains("rail-collapsed")) setRailCollapsed(false);
+  $("edit-change").focus();
+});
+
+$("lb-review").addEventListener("click", () => {
+  if (!lbItem?.edit) return;
+  openCompareModal(lbParent, lbItem, true);
   closeLightbox();
 });
 
 $("lb-del").addEventListener("click", async () => {
-  if (!lbName) { closeLightbox(); return; }
+  const name = lbItem?.name;
+  if (!name) { closeLightbox(); return; }
   if (!confirm("删除这张照片？文件会从 outputs 里移除。")) return;
   try {
     const r = await fetch("/api/delete", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: lbName }),
+      body: JSON.stringify({ name }),
     });
     const d = await r.json();
     if (d.error) throw new Error(d.error);
-    wallItems.splice(lbIndex, 1);
-    if (wallItems.length) showLbAt(lbIndex); // 停在相邻一张
-    else closeLightbox();
+    const index = wallItems.findIndex((item) => item.name === name);
+    if (index !== -1) wallItems.splice(index, 1);
+    if (!lightboxEl.hidden && lbItem?.name === name) {
+      if (wallItems.length) showLightboxItem(wallItems[Math.max(0, index) % wallItems.length]);
+      else closeLightbox();
+    }
     loadHistory(page);
     showToast("照片已成功删除", "info");
   } catch (e) { setGenMsg("删除失败：" + e.message); showToast("删除失败：" + e.message, "error"); }
 });
+
+/* ==========================================================================
+   交互式 A/B 图像对比分析台 (Interactive A/B Comparison Modal)
+   ========================================================================== */
+let cmpItemA = null;
+let cmpItemB = null;
+let cmpSplitPct = 50;
+let cmpMode = "split"; // "split", "side", "diff"
+let cmpDragging = false;
+let cmpReview = false;
+let reviewSaving = false;
+
+function reviewCheckboxes() {
+  return [...$("compare-review").querySelectorAll("input[type=checkbox]")];
+}
+
+function updateReviewActions() {
+  if (!cmpReview) return;
+  const boxes = reviewCheckboxes();
+  const passed = boxes.filter((box) => box.checked).length;
+  const isFinal = cmpItemB.edit.review.final;
+  $("review-progress").textContent = `${passed} / ${boxes.length} 项通过${isFinal ? " · 已标记成稿" : ""}`;
+  $("review-save").disabled = reviewSaving;
+  $("review-final").disabled = reviewSaving || (!isFinal && passed !== boxes.length);
+  $("review-final").textContent = isFinal ? "取消成稿标记" : "标记为成稿";
+  boxes.forEach((box) => { box.disabled = reviewSaving; });
+}
+
+function renderCompareReview() {
+  $("compare-review").hidden = !cmpReview;
+  if (!cmpReview) return;
+  $("review-message").textContent = "";
+  $("review-missing-source").hidden = Boolean(cmpItemA);
+  const { change, keep, review } = cmpItemB.edit;
+  $("review-keep-group").hidden = !keep.length;
+  for (const [id, items, offset] of [["review-change", change, 0], ["review-keep", keep, change.length]]) {
+    $(id).replaceChildren(...items.map((text, index) => {
+      const label = document.createElement("label");
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.checked = review.checks[offset + index];
+      const description = document.createElement("span");
+      description.textContent = text;
+      label.append(box, description);
+      return label;
+    }));
+  }
+  updateReviewActions();
+}
+
+async function saveCompareReview(markFinal) {
+  if (!cmpReview || reviewSaving) return;
+  const item = cmpItemB;
+  const checks = reviewCheckboxes().map((box) => box.checked);
+  const final = markFinal ? !item.edit.review.final : item.edit.review.final && checks.every(Boolean);
+  reviewSaving = true;
+  updateReviewActions();
+  $("review-message").textContent = "正在保存…";
+  try {
+    const response = await fetch("/api/history/review", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: item.name, checks, final }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "保存失败");
+    item.edit.review = data.review;
+    if (cmpItemB === item && cmpReview) {
+      $("review-message").textContent = data.review.final ? "已保存为成稿" : "验收已保存";
+    }
+    if (lbItem?.name === item.name) loadLightboxVersions(lbItem);
+    loadHistory(page, false);
+  } catch (error) {
+    if (cmpItemB === item && cmpReview) $("review-message").textContent = `未能保存 · ${error.message}`;
+  } finally {
+    reviewSaving = false;
+    updateReviewActions();
+  }
+}
+
+function openCompareModal(itemA = null, itemB = null, review = false) {
+  const modal = $("compare-modal");
+  if (!modal) return;
+
+  if (!review) {
+    if (!itemA && wallItems.length) itemA = wallItems[0];
+    if (!itemB) {
+      itemB = wallItems.find((item) => item.name !== itemA?.name) || itemA;
+    }
+  }
+
+  if (!itemA && !itemB) {
+    showToast("画廊中暂无作品可供比对，请先生成或加载照片", "info");
+    return;
+  }
+
+  cmpReview = review && Boolean(itemB?.edit);
+  cmpItemA = cmpReview ? itemA : itemA || itemB;
+  cmpItemB = itemB || itemA;
+
+  const imgA = $("compare-img-a");
+  const imgB = $("compare-img-b");
+  imgA.hidden = !cmpItemA;
+  if (cmpItemA) imgA.src = cmpItemA.url;
+  else imgA.removeAttribute("src");
+  imgB.src = cmpItemB.url;
+  $("compare-tag-a").textContent = cmpReview ? (cmpItemA ? "原图" : "原图缺失") : "方案 A";
+  $("compare-tag-b").textContent = cmpReview ? "改图" : "方案 B";
+
+  updateCmpCard("a", cmpItemA);
+  updateCmpCard("b", cmpItemB);
+
+  renderCompareReview();
+  setCompareMode(cmpReview && !cmpItemA ? "side" : "split");
+  setCompareSplit(50);
+
+  modal.classList.remove("closing");
+  modal.hidden = false;
+  modal.querySelector(".compare-frame").scrollTop = 0;
+  $("compare-close").focus({ preventScroll: true });
+
+  if (gsapOK) {
+    gsap.from(".compare-frame", { y: 24, autoAlpha: 0, duration: 0.35, ease: "power2.out", clearProps: "all" });
+  }
+}
+
+function updateCmpCard(prefix, item) {
+  item = item || {};
+  const setTxt = (id, txt) => { const el = $(`cmp-${id}-${prefix}`); if (el) el.textContent = txt; };
+  setTxt("model", item.model || "—");
+  setTxt("time", item.created_time || (item.elapsed ? `${item.elapsed}s` : "—"));
+  setTxt("prompt", item.prompt || "（无提示词记录）");
+  setTxt("seed", `请求 Seed ${item.seed ?? "—"}`);
+  setTxt("cfg", `请求 CFG ${item.cfg_scale ?? "—"}`);
+  setTxt("size", `尺寸: ${item.size ? item.size.replace("x", "×") : "—"}`);
+  setTxt("prov", `线路: ${item.provider || "主线路"}`);
+}
+
+function closeCompareModal() {
+  const modal = $("compare-modal");
+  if (!modal || modal.hidden) return;
+  closeOverlayAnimated(modal, () => {
+    const reviewed = cmpReview ? cmpItemB : null;
+    cmpReview = false;
+    cmpItemA = null;
+    cmpItemB = null;
+    if (reviewed) openLightboxItem(reviewed);
+  });
+}
+
+function setCompareSplit(pct) {
+  cmpSplitPct = Math.max(0, Math.min(100, pct));
+  const handle = $("compare-handle");
+  const layerA = $("compare-layer-a");
+  if (handle) {
+    handle.style.left = `${cmpSplitPct}%`;
+    handle.setAttribute("aria-valuenow", String(Math.round(cmpSplitPct)));
+  }
+  if (layerA) {
+    layerA.style.clipPath = `polygon(0 0, ${cmpSplitPct}% 0, ${cmpSplitPct}% 100%, 0 100%)`;
+  }
+}
+
+function setCompareMode(mode) {
+  cmpMode = mode;
+  const wrap = $("compare-split-wrap");
+  const handle = $("compare-handle");
+  const layerA = $("compare-layer-a");
+
+  document.querySelectorAll(".compare-pill-btn").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.cmp === mode);
+  });
+
+  if (!wrap) return;
+  wrap.classList.remove("mode-side", "mode-diff");
+
+  if (mode === "side") {
+    wrap.classList.add("mode-side");
+    if (handle) handle.hidden = true;
+    if (layerA) layerA.style.clipPath = "none";
+  } else if (mode === "diff") {
+    wrap.classList.add("mode-diff");
+    if (handle) handle.hidden = true;
+    if (layerA) layerA.style.clipPath = "none";
+  } else {
+    if (handle) handle.hidden = false;
+    setCompareSplit(cmpSplitPct);
+  }
+}
+
+function initCompareTool() {
+  const closeBtn = $("compare-close");
+  const modal = $("compare-modal");
+  const handle = $("compare-handle");
+  const splitWrap = $("compare-split-wrap");
+
+  $("compare-review").addEventListener("change", updateReviewActions);
+  $("review-save").addEventListener("click", () => saveCompareReview(false));
+  $("review-final").addEventListener("click", () => saveCompareReview(true));
+  if (closeBtn) closeBtn.addEventListener("click", closeCompareModal);
+  if (modal) {
+    modal.addEventListener("click", (e) => {
+      if (e.target === modal) closeCompareModal();
+    });
+  }
+
+  document.querySelectorAll(".compare-pill-btn").forEach((btn) => {
+    btn.addEventListener("click", () => setCompareMode(btn.dataset.cmp));
+  });
+
+  $("f-compare")?.addEventListener("click", () => openCompareModal());
+
+  $("lb-compare-btn")?.addEventListener("click", () => {
+    const curItem = lbItem;
+    closeLightbox();
+    setTimeout(() => openCompareModal(curItem), 120);
+  });
+
+  if (handle && splitWrap) {
+    const onPointerMove = (e) => {
+      if (!cmpDragging) return;
+      const rect = splitWrap.getBoundingClientRect();
+      if (!rect.width) return;
+      const x = e.clientX - rect.left;
+      const pct = (x / rect.width) * 100;
+      setCompareSplit(pct);
+    };
+
+    const onPointerUp = (e) => {
+      if (!cmpDragging) return;
+      cmpDragging = false;
+      try { handle.releasePointerCapture(e.pointerId); } catch {}
+      splitWrap.classList.remove("dragging");
+    };
+
+    handle.addEventListener("pointerdown", (e) => {
+      cmpDragging = true;
+      try { handle.setPointerCapture(e.pointerId); } catch {}
+      splitWrap.classList.add("dragging");
+      e.preventDefault();
+    });
+
+    handle.addEventListener("pointermove", onPointerMove);
+    handle.addEventListener("pointerup", onPointerUp);
+    handle.addEventListener("pointercancel", onPointerUp);
+
+    splitWrap.addEventListener("click", (e) => {
+      if (cmpMode !== "split" || e.target.closest("#compare-handle")) return;
+      const rect = splitWrap.getBoundingClientRect();
+      if (!rect.width) return;
+      const pct = ((e.clientX - rect.left) / rect.width) * 100;
+      if (gsapOK) {
+        gsap.to({ p: cmpSplitPct }, {
+          p: pct,
+          duration: 0.25,
+          ease: "power2.out",
+          onUpdate: function () { setCompareSplit(this.targets()[0].p); },
+        });
+      } else {
+        setCompareSplit(pct);
+      }
+    });
+
+    handle.addEventListener("keydown", (e) => {
+      if (cmpMode !== "split") return;
+      if (e.key === "ArrowLeft") { e.preventDefault(); setCompareSplit(cmpSplitPct - (e.shiftKey ? 10 : 2)); }
+      else if (e.key === "ArrowRight") { e.preventDefault(); setCompareSplit(cmpSplitPct + (e.shiftKey ? 10 : 2)); }
+      else if (e.key === "Home") { e.preventDefault(); setCompareSplit(0); }
+      else if (e.key === "End") { e.preventDefault(); setCompareSplit(100); }
+    });
+  }
+}
+
+/* ==========================================================================
+   Pro Style & Camera Preset Matrix 矩阵控制器
+   ========================================================================== */
+function initPresetMatrix() {
+  const matrix = $("style-preset-matrix");
+  const toggleBtn = $("prompt-matrix-btn");
+  const closeBtn = $("spm-close-btn");
+
+  if (toggleBtn && matrix) {
+    toggleBtn.addEventListener("click", () => {
+      const isOpen = !matrix.hidden;
+      matrix.hidden = isOpen;
+      toggleBtn.classList.toggle("on", !isOpen);
+      if (!isOpen && gsapOK) {
+        gsap.from(matrix, { opacity: 0, y: -8, duration: 0.28, ease: "power2.out", clearProps: "all" });
+      }
+    });
+  }
+
+  if (closeBtn && matrix) {
+    closeBtn.addEventListener("click", () => {
+      matrix.hidden = true;
+      toggleBtn?.classList.remove("on");
+    });
+  }
+
+  // 选项卡切换
+  const tabs = document.querySelectorAll(".spm-tab");
+  tabs.forEach((tab) => {
+    tab.addEventListener("click", () => {
+      tabs.forEach((t) => {
+        t.classList.remove("active");
+        t.setAttribute("aria-selected", "false");
+      });
+      tab.classList.add("active");
+      tab.setAttribute("aria-selected", "true");
+
+      const targetTab = tab.dataset.tab;
+      document.querySelectorAll(".spm-panel").forEach((panel) => {
+        const isMatch = panel.id === `spm-panel-${targetTab}`;
+        panel.hidden = !isMatch;
+        panel.classList.toggle("active", isMatch);
+        if (isMatch && gsapOK) {
+          gsap.from(panel.querySelectorAll(".preset-chip"), {
+            opacity: 0,
+            y: 6,
+            duration: 0.22,
+            stagger: 0.02,
+            ease: "power1.out",
+            clearProps: "all",
+          });
+        }
+      });
+    });
+  });
+
+  // Preset Chips 点击添加/切换
+  document.querySelectorAll(".preset-chip").forEach((chip) => {
+    chip.addEventListener("click", () => {
+      const preset = chip.dataset.preset;
+      if (!preset) return;
+      togglePresetInPrompt(preset, chip);
+    });
+  });
+
+  $("prompt").addEventListener("input", syncPresetChipsActive);
+}
+
+function togglePresetInPrompt(term, chipEl) {
+  const promptEl = $("prompt");
+  let val = promptEl.value.trim();
+  const exists = val.includes(term);
+
+  if (exists) {
+    let regex = new RegExp(`([，,\\s]*)${escapeRegExp(term)}([，,\\s]*)`, "g");
+    val = val.replace(regex, (match, p1, p2) => {
+      return (p1 && p2) ? "，" : "";
+    }).replace(/^[，,\\s]+|[，,\\s]+$/g, "");
+    setPrompt(val);
+    chipEl?.classList.remove("active", "selected");
+    showToast(`已移除预设：${chipEl ? chipEl.textContent.trim() : term}`, "info");
+  } else {
+    if (!val) {
+      val = term;
+    } else {
+      const needComma = !/[，,、；;。\s]$/.test(val);
+      val = val + (needComma ? "，" : " ") + term;
+    }
+    setPrompt(val);
+    chipEl?.classList.add("active", "selected");
+    if (gsapOK && chipEl) {
+      gsap.fromTo(chipEl, { scale: 0.94 }, { scale: 1, duration: 0.2, ease: "back.out(2)" });
+    }
+    showToast(`已追加预设：${chipEl ? chipEl.textContent.trim() : term}`, "success");
+  }
+  syncPresetChipsActive();
+}
+
+function syncPresetChipsActive() {
+  const promptVal = $("prompt")?.value || "";
+  document.querySelectorAll(".preset-chip").forEach((chip) => {
+    const p = chip.dataset.preset;
+    const on = p && promptVal.includes(p);
+    chip.classList.toggle("active", on);
+    chip.classList.toggle("selected", on);
+  });
+}
+
+function escapeRegExp(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/* ==========================================================================
+   反向提示词 & 种子随机 & CFG 控制器
+   ========================================================================== */
+function initNegativePromptAndProParams() {
+  const negToggleBtn = $("neg-toggle-btn");
+  const negBody = $("neg-body");
+  const negClearBtn = $("neg-clear-btn");
+  const negTextarea = $("negative-prompt");
+  const updateParams = () => {
+    saveGenSettings();
+    renderRequestPreview(capabilityFor(modelInput.value));
+  };
+  $("send-extension-params").addEventListener("change", updateParams);
+  $("send-cfg-scale").addEventListener("change", updateParams);
+
+  if (negToggleBtn && negBody) {
+    negToggleBtn.addEventListener("click", () => {
+      const isHidden = negBody.hidden;
+      negBody.hidden = !isHidden;
+      negToggleBtn.setAttribute("aria-expanded", String(isHidden));
+      negToggleBtn.classList.toggle("open", isHidden);
+      if (isHidden && gsapOK) {
+        gsap.from(negBody, { opacity: 0, height: 0, duration: 0.25, ease: "power2.out", clearProps: "all" });
+      }
+    });
+  }
+
+  if (negClearBtn && negTextarea) {
+    negClearBtn.addEventListener("click", () => {
+      if (!negTextarea.value.trim()) return;
+      negTextarea.value = "";
+      updateParams();
+      showToast("已清空反向提示词", "info");
+    });
+  }
+
+  document.querySelectorAll(".neg-tag").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const neg = btn.dataset.neg || btn.dataset.negative;
+      if (!neg || !negTextarea) return;
+      let cur = negTextarea.value.trim();
+      if (!cur) {
+        negTextarea.value = neg;
+      } else if (!cur.includes(neg)) {
+        const needComma = !/[，,、；;。\s]$/.test(cur);
+        negTextarea.value = cur + (needComma ? "，" : " ") + neg;
+      }
+      updateParams();
+      showToast(`已追加排除项: ${btn.textContent.trim()}`, "info");
+    });
+  });
+
+  if (negTextarea) {
+    negTextarea.addEventListener("input", updateParams);
+  }
+
+  const seedInput = $("seed-input");
+  seedInput.addEventListener("input", updateParams);
+  const seedRandomBtn = $("seed-random-btn");
+  if (seedRandomBtn && seedInput) {
+    seedRandomBtn.addEventListener("click", () => {
+      const newSeed = Math.floor(Math.random() * 2147483647);
+      seedInput.value = String(newSeed);
+      if (gsapOK) {
+        gsap.fromTo(seedRandomBtn.querySelector("svg"), { rotation: 0 }, { rotation: 360, duration: 0.45, ease: "power2.out" });
+      }
+      playShutterSound();
+      updateParams();
+      showToast(`已生成随机种子: ${newSeed}`, "info");
+    });
+  }
+
+  const cfgSlider = $("cfg-slider");
+  const cfgVal = $("cfg-val");
+  if (cfgSlider && cfgVal) {
+    cfgSlider.addEventListener("input", () => {
+      const v = parseFloat(cfgSlider.value).toFixed(1);
+      cfgVal.textContent = v;
+      $("send-cfg-scale").checked = true;
+      updateParams();
+    });
+  }
+}
 
 /* ---------- 灵感骰子 & 风格修饰 ---------- */
 const INSPIRATION_PROMPTS = [
@@ -1920,6 +2946,9 @@ const INSPIRATION_PROMPTS = [
 ];
 
 $("prompt-dice")?.addEventListener("click", () => {
+  const dice = $("prompt-dice");
+  dice.classList.add("rolling");
+  setTimeout(() => dice.classList.remove("rolling"), 600);
   const p = INSPIRATION_PROMPTS[Math.floor(Math.random() * INSPIRATION_PROMPTS.length)];
   setPrompt(p);
   $("prompt").focus();
@@ -1983,7 +3012,6 @@ function setViewMode(mode) {
     b.classList.toggle("on", b.dataset.mode === mode);
   });
   lsSet(VIEW_MODE_KEY, mode);
-  // 布局切换时卡片轻量重入场，给模式切换一个可感知的反馈
   if (gsapOK) gsap.from("#gallery .print", { y: 14, autoAlpha: 0, duration: 0.4, stagger: 0.03, ease: "power2.out", clearProps: "all" });
 }
 
@@ -2020,11 +3048,12 @@ $("pf-key-eye")?.addEventListener("click", () => {
 });
 
 /* ---------- 快捷键 ---------- */
-$("prompt").addEventListener("keydown", (e) => {
-  if (e.ctrlKey && e.key === "Enter") { e.preventDefault(); gen(); }
-});
+for (const id of ["prompt", "edit-change", "edit-keep"]) {
+  $(id).addEventListener("keydown", (e) => {
+    if (e.ctrlKey && e.key === "Enter") { e.preventDefault(); gen(); }
+  });
+}
 
-/* 提示词：整段使用，只更新字数与草稿，不做任何拆分 */
 let draftTimer = null;
 $("prompt").addEventListener("input", () => {
   renderPromptMeta();
@@ -2038,7 +3067,6 @@ $("go").addEventListener("click", () => {
   else gen();
 });
 
-/* 高级参数改动要记住，并同步「将发送」与摘要 */
 for (const id of ["quality", "background", "style"]) {
   $(id).addEventListener("change", () => {
     saveGenSettings();
@@ -2053,14 +3081,44 @@ $("rs-switch").addEventListener("click", () => {
   refreshHealth(false);
 });
 
+/* ---------- 创作侧栏折叠/展开 ---------- */
+const RAIL_COLLAPSED_KEY = "is_rail_collapsed";
+function setRailCollapsed(collapsed) {
+  document.body.classList.toggle("rail-collapsed", !!collapsed);
+  lsSet(RAIL_COLLAPSED_KEY, !!collapsed);
+  if (gsapOK && !collapsed) {
+    gsap.from(".rail", { x: -30, opacity: 0.7, duration: 0.3, ease: "power2.out", clearProps: "all" });
+  }
+}
+$("rail-collapse-btn")?.addEventListener("click", () => setRailCollapsed(true));
+$("rail-expand-btn")?.addEventListener("click", () => setRailCollapsed(false));
+if (lsGet(RAIL_COLLAPSED_KEY, false)) {
+  setRailCollapsed(true);
+}
+
+function initShortcutsModal() {
+  $("open-shortcuts")?.addEventListener("click", openShortcutsModal);
+  $("shortcuts-btn")?.addEventListener("click", openShortcutsModal);
+  $("shortcuts-close")?.addEventListener("click", closeShortcutsModal);
+  $("shortcuts-modal")?.addEventListener("click", (e) => {
+    if (e.target === $("shortcuts-modal")) closeShortcutsModal();
+  });
+}
+
 /* ---------- 启动 ---------- */
-restoreGenSettings();    // 先恢复上次的画幅 / 数量 / 高级参数，再渲染按钮高亮
+restoreGenSettings();
 renderQuantityGroup();
-setPrompt(loadDraft());  // 上次没写完的提示词也还在
+setPrompt(loadDraft());
 enterRail();
 loadCapabilities();
 loadSettings();
 loadModels();
 renderPromptHistory();
 setViewMode(lsGet(VIEW_MODE_KEY, "masonry"));
+initSoundEngine();
+initPresetMatrix();
+initNegativePromptAndProParams();
+initCompareTool();
+initMinimapRadar();
+initShortcutsModal();
 loadHistory(1);
